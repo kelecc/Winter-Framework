@@ -5,5 +5,4 @@ package top.kelecc;
  */
 public class AppTest
 {
-
 }
