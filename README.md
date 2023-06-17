@@ -97,7 +97,20 @@ public record Resource(String path, String name) {
 > 
 > 这样一来，你就可以方便地使用 `resource.path()` 或 `resource.name()` 方法来获取该资源对象的路径或名称了。 
 
+再仿造Spring提供一个`ResourceResolver`，定义`scan()`方法来获取扫描到的`Resource`：
+```java
+public class ResourceResolver {
+    String basePackage;
 
+    public ResourceResolver(String basePackage) {
+        this.basePackage = basePackage;
+    }
+
+    public <R> List<R> scan(Function<Resource, R> mapper) {
+        ...
+    }
+}
+```
 
 
 
