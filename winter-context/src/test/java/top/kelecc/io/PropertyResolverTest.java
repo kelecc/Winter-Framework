@@ -3,9 +3,12 @@ package top.kelecc.io;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import top.kelecc.util.YamlUtils;
 
 import java.io.IOException;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
@@ -33,6 +36,16 @@ public class PropertyResolverTest {
         if (localDate != null) {
             System.out.println(localDate);
         }
+    }
+
+    @Test
+    public void loadYamlTest(){
+        Map<String, Object> map = YamlUtils.loadYamlAsPlainMap("application.yaml");
+        Properties properties = new Properties();
+        properties.putAll(map);
+        PropertyResolver propertyResolver = new PropertyResolver(properties);
+        LocalDateTime localDateTime = propertyResolver.getProperty("web.localDateTime", LocalDateTime.class);
+        System.out.println(localDateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
     }
 
 }

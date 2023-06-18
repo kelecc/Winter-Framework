@@ -353,3 +353,45 @@ propertyResolver = new PropertyResolver(props);
 LocalDate localDate = propertyResolver.getProperty("${localDate:2023-06-18}", LocalDate.class);
 ```
 
+**使用YAML配置**
+Spring Framework并不支持YAML配置，但Spring Boot支持。因为`yaml`配置比`.properties`要方便，所以我们把对YAML的支持也集成进来。
+
+首先引入依赖`org.yaml:snakeyaml:2.0`，然后我们写一个`YamlUtils`，通过`loadYamlAsPlainMap()`方法读取一个YAML文件，并返回`Map`：
+```java
+public class YamlUtils {
+    public static Map<String, Object> loadYamlAsPlainMap(String path) {
+        return ...
+    }
+}
+```
+我们把YAML格式：
+```yaml
+server:
+  port: 8080
+kele:
+  lover:
+    name:
+      - 可乐
+      - 雪碧
+      - 芬达
+```
+读取为`Map`，其中，每个key都是完整路径，相当于把它变为`.properties`格式：
+```properties
+server.port=8080
+kele.lover.name[0]=可乐
+kele.lover.name[1]=雪碧
+kele.lover.name[2]=芬达
+```
+这样我们无需改动`PropertyResolver`的代码，使用YAML时，可以按如下方式读取配置：
+```java
+Map<String, Object> map = YamlUtils.loadYamlAsPlainMap("application.yaml");
+Properties properties = new Properties();
+properties.putAll(map);
+PropertyResolver propertyResolver = new PropertyResolver(properties);
+LocalDateTime localDateTime = propertyResolver.getProperty("web.localDateTime", LocalDateTime.class);
+System.out.println(localDateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+```
+
+> 读取YAML的代码比较简单，注意要点如下：
+> 1. SnakeYaml默认读出的结构是树形结构，需要“拍平”成abc.xyz格式的key；
+> 2. SnakeYaml默认会自动转换int、boolean等value，需要禁用自动转换，把所有value均按String类型返回。

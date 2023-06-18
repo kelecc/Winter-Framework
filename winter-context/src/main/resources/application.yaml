@@ -1,0 +1,8 @@
+server:
+  port: 8080
+kele:
+  lover:
+    name:
+      - 可乐
+      - 雪碧
+      - 芬达
