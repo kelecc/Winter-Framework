@@ -1,7 +1,6 @@
-package top.kelecc;
+package top.kelecc.io;
 
 import org.junit.jupiter.api.Test;
-import top.kelecc.io.ResourceResolver;
 
 import java.util.List;
 
@@ -15,7 +14,7 @@ public class ResourceResolverTest {
      */
     @Test
     public void scanTest() {
-        ResourceResolver rr = new ResourceResolver("org.slf4j");
+        ResourceResolver rr = new ResourceResolver("");
         List<String> classList = rr.scan(res -> {
             String name = res.getName(); // 资源名称"org/example/Hello.class"
             if (name.endsWith(".class")) { // 如果以.class结尾

@@ -155,5 +155,201 @@ while (en.hasMoreElements()) {
 
 这样我们就完成了能扫描指定包以及子包下所有文件的`ResourceResolver`。
 
+## 2. 实现PropertyResolver
+Spring的注入分为`@Autowired`和`@Value`两种。对于`@Autowired`，涉及到Bean的依赖，而对于`@Value`，则仅仅是将对应的配置注入，不涉及Bean的依赖，相对比较简单。为了注入配置，我们用`PropertyResolver`保存所有配置项，对外提供查询功能。
 
+本节我们来实现`PropertyResolver`，它支持3种查询方式：
+1. 按配置的key查询，例如：`getProperty("app.title")`;
+2. 以`${abc.xyz}`形式的查询，例如，`getProperty("${app.title}")`，常用于`@Value("${app.title}")`注入；
+3. 带默认值的，以`${abc.xyz:defaultValue}`形式的查询，例如，`getProperty("${app.title:Winter}")`，常用于`@Value("${app.title:Winter}")`注入。
+
+Java本身提供了按key-value查询的`Properties`，我们先传入`Properties`，内部按key-value存储：
+```java
+public class PropertyResolver {
+
+    Map<String, String> properties = new HashMap<>();
+
+    public PropertyResolver(Properties props) {
+        //存入环境变量
+        this.properties.putAll(System.getenv());
+        //获取props的key集合
+        Set<String> names = props.stringPropertyNames();
+        names.forEach(name -> this.properties.put(name, props.getProperty(name)));
+    }
+}
+```
+这样，我们在`PropertyResolver`内部，通过一个`Map<String, String>`存储了所有的配置项，包括环境变量。对于按key查询的功能，我们可以简单实现如下：
+```java
+@Nullable
+public String getProperty(String key) {
+    return this.properties.get(key);
+}
+```
+下一步，我们准备解析`${abc.xyz:defaultValue}`这样的key，先定义一个`PropertyExpr`，把解析后的key和defaultValue存储起来：
+```java
+public class PropertyExpr {
+    private String key;
+    private String defaultValue;
+    public PropertyExpr(String key, String defaultValue) {
+        this.key = key;
+        this.defaultValue = defaultValue;
+    }
+    public String getKey() {
+        return key;
+    }
+    public String getDefaultValue() {
+        return defaultValue;
+    }
+    @Override
+    public String toString() {}
+}
+```
+然后按`${...}`解析：
+```java
+    /**
+     * 解析key是否是`${}`这种格式的
+     * @param key
+     * @return 是返回解析后的PropertyExpr否则返回null
+     */
+    PropertyExpr parse(String key) {
+        if (key.startsWith("${") && key.endsWith("}")) {
+            //先判断是否含有默认值
+            int i = key.indexOf(":");
+            if (i == -1) {
+                String parseKey = key.substring(2, key.length() - 1);
+                return new PropertyExpr(parseKey, null);
+            } else {
+                String parseKey = key.substring(2, i);
+                String defaultValue = key.substring(i + 1, key.length() - 1);
+                return new PropertyExpr(parseKey, defaultValue);
+            }
+        }
+        return null;
+    }
+```
+我们把`getProperty()`改造一下，即可实现查询`${abc.xyz:defaultValue}`：
+```java
+ /**
+     * 通过key获取value
+     * 支持通过${database:${db:redis}}进行嵌套，冒号后为默认值
+     * @param key
+     * @return key存在返回value否则返回null
+     */
+    @Nullable
+    public String getProperty(String key) {
+        PropertyExpr parse = parse(key);
+        if (Objects.isNull(parse)) {
+            return this.properties.get(key);
+        }
+        String defaultValue = parse.getDefaultValue();
+        String parseKey = parse.getKey();
+        String s = this.properties.get(parseKey);
+        if ( s != null) {
+            return s;
+        }
+        if (defaultValue != null) {
+            if (defaultValue.startsWith("${") && defaultValue.endsWith("}")){
+                return getProperty(parse.getDefaultValue());
+            }
+            return defaultValue;
+        }
+        return null;
+    }
+```
+每次查询到value后，我们递归调用`getProperty()`，这样就可以支持嵌套的key，例如：
+```java
+${app.title:${APP_NAME:Winter}}
+```
+这样可以先查询`app.title`，没有找到就再查询`APP_NAME`，还没有找到就返回默认值`Winter`。
+
+注意到Spring的`${...}`表达式实际上可以做到组合，例如：
+```java
+jdbc.url=jdbc:mysql//${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME}
+```
+而我们实现的`${...}`表达式只能嵌套，不能组合，因为要实现Spring的表达式，需要编写一个完整的能解析表达式的复杂功能，而不能仅仅依靠判断${开头、}结尾。由于解析表达式的功能过于复杂，因此我们决定不予支持。
+
+Spring还支持更复杂的`#{...}`表达式，它可以引用Bean、调用方法、计算等：
+```java
+#{appBean.version() + 1}
+```
+为此Spring专门提供了一个`spring-expression`库来支持这种更复杂的功能。按照一切从简的原则，我们不支持`#{...}`表达式。
+**实现类型转换**
+除了String类型外，`@Value`注入时，还允许`boolean`、`int`、`Long`等基本类型和包装类型。此外，Spring还支持`Date`、`Duration`等类型的注入。我们既要实现类型转换，又不能写死，否则，将来支持新的类型时就要改代码。
+
+我们先写类型转换的入口查询：
+```java
+@Nullable
+public <T> T getProperty(String key, Class<T> targetType) {
+    String value = getProperty(key);
+    if (value == null) {
+        return null;
+    }
+    // 转换为指定类型:
+    return convert(targetType, value);
+}
+```
+再考虑如何实现`convert()`方法。对于类型转换，实际上是从`String`转换为指定类型，因此，用函数式接口`Function<String, Object>`就很合适：
+```java
+@SuppressWarnings("unchecked")
+private <T> T convert(String value, Class<T> targetType) {
+    Function<String, Object> mapper = this.converters.get(targetType);
+    if (Objects.isNull(mapper)) {
+        throw new IllegalArgumentException("类型不支持：" + targetType.getName());
+    }
+    T target = null;
+    try {
+        target = (T) mapper.apply(value);
+    } catch (Exception e) {
+        throw new ClassCastException("类型转换失败：java.lang.String====>" + targetType.getName());
+    }
+    return target;
+}
+```
+这样我们就已经实现了类型转换，下一步是把各种要转换的类型放到Map里。在构造方法中，我们放入常用的基本类型转换器：
+```java
+private void initConverters(){
+        converters.put(int.class,Integer::parseInt);
+        converters.put(Integer.class,Integer::valueOf);
+        converters.put(byte.class, Byte::parseByte);
+        converters.put(Byte.class, Byte::valueOf);
+        converters.put(short.class, Short::parseShort);
+        converters.put(Short.class, Short::valueOf);
+        converters.put(long.class, Long::parseLong);
+        converters.put(Long.class, Long::valueOf);
+        converters.put(float.class, Float::parseFloat);
+        converters.put(Float.class, Float::valueOf);
+        converters.put(double.class, Double::parseDouble);
+        converters.put(Double.class, Double::valueOf);
+        converters.put(boolean.class, Boolean::parseBoolean);
+        converters.put(Boolean.class, Boolean::valueOf);
+        converters.put(char.class, s -> s.charAt(0));
+        converters.put(Character.class, s -> s.charAt(0));
+        DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+        converters.put(LocalDate.class, s -> LocalDate.parse(s, dateFormatter));
+        DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        converters.put(LocalDateTime.class, s -> LocalDateTime.parse(s, dateTimeFormatter));
+        DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss");
+        converters.put(LocalTime.class, s -> LocalTime.parse(s, timeFormatter));
+        converters.put(String.class, s -> s);
+    }
+```
+再加一个`registerConverter()`接口，我们就可以对外提供扩展，让用户自己编写自己定制的Converter。
+
+```java
+public void registerConverter(Map<Class<?>, Function<String, Object>> newConverters){
+    this.converters.putAll(newConverters);
+}
+```
+
+这样一来，我们的PropertyResolver就准备就绪，读取配置的初始化代码如下：
+```java
+// Java标准库读取properties文件:
+Properties props = new Properties();
+// 读取类路径下的application.properties配置文件
+props.load(Thread.currentThread().getContextClassLoader().getResourceAsStream("application.properties"));
+// 构造PropertyResolver
+propertyResolver = new PropertyResolver(props);
+// 获取配置信息
+LocalDate localDate = propertyResolver.getProperty("${localDate:2023-06-18}", LocalDate.class);
+```
 
