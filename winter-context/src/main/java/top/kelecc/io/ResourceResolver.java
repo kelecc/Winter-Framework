@@ -93,7 +93,9 @@ public class ResourceResolver {
                         String path = file.toString().replace('\\', '/');
                         String name = removeLeadingSlash(path.substring(baseDir.length())).replace('\\', '/');
                         Resource resource = new Resource("file:" + path, name);
-                        logger.debug("扫描到资源：{}", resource.getName());
+                        if (logger.isDebugEnabled()) {
+                            logger.debug("扫描到资源：{}", resource.getName());
+                        }
                         R apply = mapper.apply(resource);
                         if (!Objects.isNull(apply)) {
                             result.add(apply);
