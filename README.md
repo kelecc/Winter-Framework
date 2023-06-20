@@ -10,15 +10,23 @@
 > * 剩下的将进一步完善...
 
 # 实现IOC容器功能
-Spring的核心就是能管理一组Bean，并能自动配置依赖关系的IoC容器。而我们的**Winter Framework**的核心**context模块**就是要实现IoC容器。
+
+Spring的核心就是能管理一组Bean，并能自动配置依赖关系的IoC容器。而我们的**Winter Framework**的核心**context模块**
+就是要实现IoC容器。
 
 ---
 **设计目标**
-Spring的IoC容器分为两类：BeanFactory和ApplicationContext，前者总是延迟创建Bean，而后者则在启动时初始化所有Bean。实际使用时，99%都采用ApplicationContext，因此，Summer Framework仅实现ApplicationContext，不支持BeanFactory。
 
-早期的Spring容器采用XML来配置Bean，后期又加入了自动扫描包的功能，即通过`<context:component-scan base-package="org.example"/>`的配置。再后来，又加入了Annotation配置，并通过`@ComponentScan`注解实现自动扫描。如果使用Spring Boot，则99%都采用`@ComponentScan`注解方式配置，因此，Summer Framework也仅实现Annotation配置+`@ComponentScan`扫描方式完成容器的配置。
+Spring的IoC容器分为两类：BeanFactory和ApplicationContext，前者总是延迟创建Bean，而后者则在启动时初始化所有Bean。实际使用时，99%都采用ApplicationContext，因此，Winter
+Framework仅实现ApplicationContext，不支持BeanFactory。
 
-此外，Summer Framework仅支持Singleton类型的Bean，不支持Prototype类型的Bean，因为实际使用中，99%都采用Singleton。依赖注入则与Spring保持一致，支持构造方法、Setter方法与字段注入。支持`@Configuration`和`BeanPostProcessor`。至于Spring的其他功能，例如，层级容器、MessageSource、一个Bean允许多个名字等功能，一概不支持！
+早期的Spring容器采用XML来配置Bean，后期又加入了自动扫描包的功能，即通过`<context:component-scan base-package="org.example"/>`
+的配置。再后来，又加入了Annotation配置，并通过`@ComponentScan`注解实现自动扫描。如果使用Spring
+Boot，则99%都采用`@ComponentScan`注解方式配置，因此，Winter Framework也仅实现Annotation配置+`@ComponentScan`扫描方式完成容器的配置。
+
+此外，Winter
+Framework仅支持Singleton类型的Bean，不支持Prototype类型的Bean，因为实际使用中，99%都采用Singleton。依赖注入则与Spring保持一致，支持构造方法、Setter方法与字段注入。支持`@Configuration`
+和`BeanPostProcessor`。至于Spring的其他功能，例如，层级容器、MessageSource、一个Bean允许多个名字等功能，一概不支持！
 
 下表列出了Spring Framework和Winter Framework在IoC容器方面的异同：
 
@@ -47,7 +55,7 @@ public class AppConfig {
 @Component
 public class UserService {
 }
-``` 
+```
 我们用到的许多第三方组件也经常会纳入IoC容器管理。这些第三方组件是不可能带有`@Component`注解的，引入第三方`Bean`只能通过工厂模式，即在`@Configuration`工厂类中定义带`@Bean`的工厂方法：
 ```java
 @Configuration
@@ -1043,7 +1051,7 @@ private Object createBeanAsEarlySingleton(BeanDefinition beanDefinition){
         logger.debug("尝试将Bean '{}': {} 创建为早期单例。",beanDefinition.getName(),beanDefinition.getBeanClass().getName());
         //检测是否产生循环依赖
         if(!creatingBeanNames.add(beanDefinition.getName())){
-        return new UnsatisfiedDependencyException(String.format("创建Bean '%s' 时检测到循环依赖。",beanDefinition.getName()));
+        throw new UnsatisfiedDependencyException(String.format("创建Bean '%s' 时检测到循环依赖。",beanDefinition.getName()));
         }
         //创建方式，构造函数或工厂方法
         Executable createFn;
@@ -1103,6 +1111,42 @@ final Class<?> type=parameter.getType();
         args[i]=null;
         }
         }
+        }
+
+        //创建bean
+        Object instance;
+        if(beanDefinition.getFactoryMethod()==null){
+        //用构造方法
+        try{
+        instance=beanDefinition.getConstructor().newInstance(args);
+        }catch(Exception e){
+        throw new BeanCreationException(String.format("创建Bean '%s': %s"+"时发生异常！",beanDefinition.getName(),beanDefinition.getBeanClass().getName()),e);
+        }
+        }else{
+        //用@Bean方法创建
+        Object configInstance=getBean(beanDefinition.getFactoryName());
+        try{
+        instance=beanDefinition.getFactoryMethod().invoke(configInstance,args);
+        }catch(Exception e){
+        throw new BeanCreationException(String.format("创建Bean '%s': %s"+"时发生异常！",beanDefinition.getName(),beanDefinition.getBeanClass().getName()),e);
+        }
+        }
+        //将创建的bean存入beanDefinition的instance
+        beanDefinition.setInstance(instance);
+
+        //调用BeanPostProcessor处理bean
+        for(BeanPostProcessor processor:beanPostProcessors){
+        Object processed=processor.postProcessBeforeInitialization(beanDefinition.getInstance(),beanDefinition.getName());
+        if(processed==null){
+        throw new BeanCreationException(String.format("PostBeanProcessor '%s' 处理Bean '%s' 时返回值为null!",processor,beanDefinition.getName()));
+        }
+        if(beanDefinition.getInstance()!=processed){
+        logger.debug("Bean '{}' 被post processor {} 替换了。",beanDefinition.getName(),processor.getClass().getName());
+        beanDefinition.setInstance(processed);
+        }
+        }
+
+        return instance;
         }
 ```
 
