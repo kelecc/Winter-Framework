@@ -111,7 +111,7 @@ public class ResourceResolver {
     }
 }
 ```
-这样，我们就可以扫描指定包下的所有文件。有的同学会问，我们的目的是扫描`.class`文件，如何过滤出Class？
+这样，我们就可以扫描指定包下的所有文件。我们的目的是扫描`.class`文件，如何过滤出Class？
 
 注意到`scan()`方法传入了一个映射函数，我们传入`Resource`到Class Name的映射，就可以扫描出Class Name：
 ```java
@@ -395,3 +395,414 @@ System.out.println(localDateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd 
 > 读取YAML的代码比较简单，注意要点如下：
 > 1. SnakeYaml默认读出的结构是树形结构，需要“拍平”成abc.xyz格式的key；
 > 2. SnakeYaml默认会自动转换int、boolean等value，需要禁用自动转换，把所有value均按String类型返回。
+
+## 3. 创建BeanDefinition
+现在，我们可以用`ResourceResolver`扫描`Class`，用`PropertyResolver`获取配置，下面，我们开始实现IoC容器。
+
+在IoC容器中，每个Bean都有一个唯一的名字标识。Spring还允许为一个Bean定义多个名字，这里我们简化一下，一个Bean只允许一个名字，因此，很容易想到用一个`Map<String, Object>`保存所有的Bean：
+```java
+public class AnnotationConfigApplicationContext {
+    Map<String, Object> beans;
+}
+```
+这么做不是不可以，但是丢失了大量Bean的定义信息，不便于我们创建Bean以及解析依赖关系。合理的方式是先定义`BeanDefinition`，它能从`Annotation`中提取到足够的信息，便于后续创建Bean、设置依赖、调用初始化方法等：
+```java
+public class BeanDefinition implements Comparable<BeanDefinition>{
+    // 全局唯一的Bean Name:
+    String name;
+    // Bean的声明类型:
+    Class<?> beanClass;
+    // Bean的实例:
+    Object instance = null;
+    // 构造方法/null:
+    Constructor<?> constructor;
+    // 工厂方法名称/null:
+    String factoryName;
+    // 工厂方法/null:
+    Method factoryMethod;
+    // Bean的顺序:
+    int order;
+    // 是否标识@Primary:
+    boolean primary;
+    // init/destroy方法名称:
+    String initMethodName;
+    String destroyMethodName;
+    // init/destroy方法:
+    Method initMethod;
+    Method destroyMethod;
+}
+```
+> BeanDefinition实现Comparable接口重写compareTo方法来实现对bean进行排序
+> ```java
+>    @Override
+>    public int compareTo(BeanDefinition def) {
+>        int cmp = Integer.compare(this.order, def.order);
+>        if (cmp != 0) {
+>            return cmp;
+>        }
+>        return this.name.compareTo(def.name);
+>    }
+> ```
+> 根据给定的 BeanDefinition 对象的优先级（order）和名称（name）进行排序。
+> 首先，它比较两个 BeanDefinition 对象的优先级（order）。如果两个对象的优先级不相等，则返回它们之间的比较结果。这意味着具有较小优先级的 BeanDefinition 对象将在排序后的列表中排在前面。
+> 如果两个对象的优先级相等，则根据它们的名称（name）进行比较。使用字符串的自然排序来确定它们在排序后的列表中的位置。
+> 
+> 通过这种方式，可以将 BeanDefinition 对象按照优先级和名称进行排序，以满足特定的排序需求。
+
+对于自己定义的带`@Component`注解的Bean，我们需要获取Class类型，获取构造方法来创建Bean，然后收集`@PostConstruct`和`@PreDestroy`标注的初始化与销毁的方法，以及其他信息，如`@Order`定义Bean的内部排序顺序，`@Primary`定义存在多个相同类型时返回哪个“主要”Bean。一个典型的定义如下：
+```java
+@Component
+public class Hello {
+    @PostConstruct
+    void init() {}
+
+    @PreDestroy
+    void destroy() {}
+}
+```
+对于`@Configuration`定义的`@Bean`方法，我们把它看作Bean的工厂方法，我们需要获取方法返回值作为Class类型，方法本身作为创建Bean的`factoryMethod`，然后收集`@Bean`定义的`initMethod`和`destroyMethod`标识的初始化于销毁的方法名，以及其他`@Order`、`@Primary`等信息。一个典型的定义如下：
+```java
+@Configuration
+public class AppConfig {
+    @Bean(initMethod="init", destroyMethod="close")
+    DataSource createDataSource() {
+        return new HikariDataSource(...);
+    }
+}
+```
+**Bean的声明类型**
+这里我们要特别注意一点，就是Bean的声明类型。对于`@Component`定义的Bean，它的声明类型就是其Class本身。然而，对于用`@Bean`工厂方法创建的Bean，它的声明类型与实际类型不一定是同一类型。上述`createDataSource()`定义的Bean，声明类型是`DataSource`，实际类型却是某个子类，例如`HikariDataSource`，因此要特别注意，我们在`BeanDefinition`中，存储的`beanClass`是声明类型，实际类型不必存储，因为可以通过`instance.getClass()`获得.
+```java
+public class BeanDefinition {
+    // Bean的声明类型:
+    Class<?> beanClass;
+
+    // Bean的实例:
+    Object instance = null;
+}
+```
+这也引出了下一个问题：如果我们按照名字查找Bean或BeanDefinition，要么拿到唯一实例，要么不存在，即通过查询`Map<String, BeanDefinition>`即可完成：
+```java
+public class AnnotationConfigApplicationContext {
+    Map<String, BeanDefinition> beans;
+
+    // 根据Name查找BeanDefinition，如果Name不存在，返回null
+    @Nullable
+    public BeanDefinition findBeanDefinition(String name) {
+        return this.beans.get(name);
+    }
+}
+```
+但是通过类型查找Bean或BeanDefinition，我们没法定义一个`Map<Class, BeanDefinition>`，原因就是Bean的声明类型与实际类型不一定相符，举个例子：
+```java
+@Configuration
+public class AppConfig {
+    @Bean
+    AtomicInteger counter() {
+        return new AtomicInteger();
+    }
+    
+    @Bean
+    Number bigInt() {
+        return new BigInteger("1000000000");
+    }
+}
+```
+当我们调用`getBean(AtomicInteger.class)`时，我们会获得`counter()`方法创建的唯一实例，但是，当我们调用`getBean(Number.class)`时，`counter()`方法和`bigInt()`方法创建的实例均符合要求，此时，如果有且仅有一个标注了`@Primary`，就返回标注了`@Primary`的Bean，否则，直接报`NoUniqueBeanDefinitionException`错误。
+
+因此，对于`getBean(Class)`方法，必须遍历找出所有符合类型的Bean，如果不唯一，再判断`@Primary`，才能返回唯一Bean或报错。
+
+我们编写一个找出所有类型的`findBeanDefinitions(Class)`方法如下：
+```java
+    /**
+    * 根据Type查找若干个BeanDefinition，返回0个或多个
+    *
+    * @param type 想要找的类型
+    * @return BeanDefinition列表
+    */
+    List<BeanDefinition> findBeanDefinitions(Class<?> type) {
+        return this.beans.values().stream()
+        .filter(def -> type.isAssignableFrom(def.getClass()))
+        .sorted()
+        .collect(Collectors.toList());
+    }
+```
+我们再编写一个`findBeanDefinition(Class)`方法如下：
+```java
+    /**
+     * 根据Type查找1个BeanDefinition，返回null或1个
+     *
+     * @param type 想要找的类型
+     * @return BeanDefinition
+     */
+    @Nullable
+    BeanDefinition findBeanDefinition(Class<?> type) {
+        List<BeanDefinition> defs = findBeanDefinitions(type);
+        //没找到任何BeanDefinition
+        if (defs.isEmpty()) {
+            return null;
+        }
+        //如果只找到一个，那么返回他
+        if (defs.size() == 1) {
+            return defs.get(0);
+        }
+        //找到多个Definition是优先查找是否有@Primary
+        //如果流中没有任何匹配的元素，返回的结果将是一个空集合（empty list），而不是 null。
+        List<BeanDefinition> primaryDefs = defs.stream()
+                .filter(BeanDefinition::isPrimary)
+                .collect(Collectors.toList());
+        //如果找到唯一的Primary
+        if (primaryDefs.size() == 1) {
+            return primaryDefs.get(0);
+        }
+        //Primary不存在
+        if (primaryDefs.isEmpty()) {
+            throw new NoUniqueBeanDefinitionException(String.format("找到多个 '%s' 类型的Bean，但是未找到有@Praimary注解的。", type.getName()));
+        } else {
+            //@Primary不唯一
+            throw new NoUniqueBeanDefinitionException(String.format("找到多个 '%s' 类型的Bean，并且找到多个@Praimary注解。", type.getName()));
+        }
+    }
+```
+现在，我们已经定义好了数据结构，下面开始获取所有BeanDefinition信息，实际分两步：
+```java
+public class AnnotationConfigApplicationContext {
+    Map<String, BeanDefinition> beans;
+
+    public AnnotationConfigApplicationContext(Class<?> configClass, PropertyResolver propertyResolver) {
+        // 扫描获取所有Bean的Class类型:
+        Set<String> beanClassNames = scanForClassNames(configClass);
+
+        // 扫描所有字节码中的注解，创建BeanDefinition:
+        this.beans = createBeanDefinitions(beanClassNames);
+    }
+    ...
+}
+```
+第一步是扫描指定包下的所有Class，然后返回Class名字，这一步比较简单：
+```java
+    /**
+     * 通过扫描配置类，获取所有的字节码类名
+     *
+     * @param configClass
+     * @return
+     */
+    public Set<String> scanForClassNames(Class<?> configClass) {
+        //获取ComponentScan注解
+        ComponentScan componentScan = ClassUtils.findAnnotation(configClass, ComponentScan.class);
+        //获取ComponentScan注解中包名，未设置则默认为configClass所在包
+        String[] scanPackages = componentScan == null || componentScan.value().length == 0 ? new String[]{configClass.getPackage().getName()} : componentScan.value();
+
+        HashSet<String> classNameSet = new HashSet<>();
+
+        for (String pkg : scanPackages) {
+            logger.debug("扫描包： {}", pkg);
+            ResourceResolver resourceResolver = new ResourceResolver(pkg);
+            List<String> classNameList = resourceResolver.scan(resource -> {
+                String name = resource.getName();
+                if (name.endsWith(".class")) {
+                    return name.substring(0, name.length() - 6).replace("/", ".").replace("\\", ".");
+                }
+                return null;
+            });
+
+            if (logger.isDebugEnabled()) {
+                classNameList.forEach((className) -> {
+                    logger.debug("通过ComponentScan注解扫描到字节码: {}", className);
+                });
+            }
+
+            classNameSet.addAll(classNameList);
+        }
+
+        //继续查找@import(****.class)导入的配置
+        Import anImport = configClass.getAnnotation(Import.class);
+        if (!Objects.isNull(anImport)) {
+            for (Class<?> importClass : anImport.value()) {
+                String name = importClass.getName();
+                //判断set中是否已经有这个类了
+                if (classNameSet.contains(name)) {
+                    logger.warn("类{}已存在,本次import已忽略！", name);
+                } else {
+                    classNameSet.add(name);
+                }
+            }
+        }
+        return classNameSet;
+    }
+```
+注意到扫描结果是指定包的所有Class名称，以及通过`@Import`导入的Class名称，下一步才会真正处理各种注解：
+```java
+    /**
+     * 扫描@Component、@Bean、@Configuration注解创建BeanDefinition
+     * @param classNames
+     * @return
+     */
+    private Map<String, BeanDefinition> createBeanDefinitions(Set<String> classNames) {
+        Map<String, BeanDefinition> beanDefinitionsMap = new HashMap<>();
+        for (String className : classNames) {
+            //1.获取Class
+            Class<?> clazz = null;
+            try {
+                clazz = Class.forName(className);
+            } catch (ClassNotFoundException e) {
+                throw new BeanCreationException(e);
+            }
+            //2.如果是接口 枚举 注解 则不管他
+            if (clazz.isAnnotation() || clazz.isEnum() || clazz.isInterface()) {
+                continue;
+            }
+
+            //3.是否有@Component注解
+            Component componentAnno = ClassUtils.findAnnotation(clazz, Component.class);
+            if (!Objects.isNull(componentAnno)) {
+                logger.debug("扫描到一个Component组件： {}", className);
+                //4.是否是抽象类
+                int mods = clazz.getModifiers();
+                if (Modifier.isAbstract(mods)) {
+                    throw new BeanDefinitionException("被@Component标注的类 " + className + " 不能是抽象类。");
+                }
+                //5.是否为private修饰的
+                if (Modifier.isPrivate(mods)) {
+                    throw new BeanDefinitionException("被@Component标注的类 " + className + " 不能是私有的。");
+                }
+                String beanName = componentAnno.value();
+                //6.未设置beanName则默认类名的首字母小写的驼峰命名
+                if ("".equals(beanName)) {
+                    beanName = Character.toLowerCase(clazz.getSimpleName().charAt(0)) + clazz.getSimpleName().substring(1);
+                }
+                BeanDefinition beanDefinition = new BeanDefinition(beanName, clazz, getSuitableConstructors(clazz), getOrder(clazz), clazz.isAnnotationPresent(Primary.class), null, null, ClassUtils.findAnnotationMethod(clazz, PostConstruct.class), ClassUtils.findAnnotationMethod(clazz, PreDestroy.class));
+                //7.加入beanDefinitionsMap集合中
+                addBeanDefinitions(beanDefinitionsMap, beanDefinition);
+                //8.扫描是否有@Configuration注解
+                Configuration configurationAnno = ClassUtils.findAnnotation(clazz, Configuration.class);
+                if (!Objects.isNull(configurationAnno)) {
+                    //9.存在Configuration注解,如果是BeanPostProcessor的实现类，那么会产生冲突
+                    if (BeanPostProcessor.class.isAssignableFrom(clazz)) {
+                        throw new BeanDefinitionException("@Configuration标注的类 " + clazz.getName() + " 不能是BeanPostProcessor的实现类！");
+                    }
+                    scanFactoryMethods(beanName, beanDefinitionsMap, clazz);
+                }
+
+
+            }
+        }
+
+        return beanDefinitionsMap;
+    }
+```
+上述代码需要注意的一点是，查找`@Component`时，并不是简单地在Class定义查看`@Component`注解，因为Spring的`@Component`是可以扩展的，例如，标记为`@Controller`的Class也符合要求：
+```java
+@Controller
+public class MvcController {...}
+```
+原因就在于，`@Controller`注解的定义包含了`@Component`：
+```java
+@Target(ElementType.TYPE)
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+@Component
+public @interface Controller {
+    String value() default "";
+}
+```
+所以，判断是否存在`@Component`，不但要在当前类查找`@Component`，还要在当前类的所有注解上，查找该注解是否有`@Component`，因此，我们编写了一个能递归查找注解的方法：
+```java
+    /**
+     * 递归查找Annotation
+     *
+     * @param target          要查找的类
+     * @param annotationClass 匹配的注解
+     * @param <A>
+     * @return 找到的注解
+     */
+    @Nullable
+    public static <A extends Annotation> A findAnnotation(Class<?> target, Class<A> annotationClass) {
+        A annotation = target.getAnnotation(annotationClass);
+        for (Annotation anno : target.getDeclaredAnnotations()) {
+            Class<? extends Annotation> annoType = anno.annotationType();
+            if (!"java.lang.annotation".equals(annoType.getPackage().getName())) {
+                A a = findAnnotation(annoType, annotationClass);
+                if (a != null) {
+                    if (annotation != null) {
+                        throw new BeanDefinitionException(String.format("类：'%s' 上有重复的 '%s' 注解！", target.getName(), annotationClass.getName()));
+                    }
+                    annotation = a;
+                }
+            }
+        }
+        return annotation;
+    }
+```
+带有`@Configuration`注解的Class，视为Bean的工厂，我们需要继续在`scanFactoryMethods()`中查找`@Bean`标注的方法：
+```java
+    /**
+     * 扫描@Configuration标注类中的@bean方法
+     *
+     * @param factoryName
+     * @param beanDefinitionsMap
+     * @param clazz
+     */
+    private void scanFactoryMethods(String factoryName, Map<String, BeanDefinition> beanDefinitionsMap, Class<?> clazz) {
+        for (Method method : clazz.getDeclaredMethods()) {
+            Bean beanAnno = method.getAnnotation(Bean.class);
+            if (!Objects.isNull(beanAnno)) {
+                //1.检查修饰符
+                int mods = method.getModifiers();
+                //1.1 不能是抽象方法
+                if (Modifier.isAbstract(mods)) {
+                    throw new BeanDefinitionException("被@Bean标注的" + clazz.getName() + "的" + method.getName() + "方法不能是抽象方法！");
+                }
+                //1.2 不能是final方法
+                if (Modifier.isFinal(mods)) {
+                    throw new BeanDefinitionException("被@Bean标注的" + clazz.getName() + "的" + method.getName() + "方法不能是final方法！");
+                }
+                //1.3 不能是private方法
+                if (Modifier.isPrivate(mods)) {
+                    throw new BeanDefinitionException("被@Bean标注的" + clazz.getName() + "的" + method.getName() + "方法不能是私有方法！");
+                }
+                //2. 检查返回值类型
+                Class<?> beanClass = method.getReturnType();
+                //2.1 返回类型不能是基本类型
+                if (beanClass.isPrimitive()) {
+                    throw new BeanDefinitionException("被@Bean标注的" + clazz.getName() + "的" + method.getName() + "方法返回值不能是基本类型！");
+                }
+                //2.2 返回类型不能是void
+                if (beanClass == void.class || beanClass == Void.class) {
+                    throw new BeanDefinitionException("被@Bean标注的" + clazz.getName() + "的" + method.getName() + "方法返回值不能是void！");
+                }
+                //3. 创建BeanDefinition
+                BeanDefinition beanDefinition = new BeanDefinition(method.getName(), beanClass, factoryName, method, getOrder(method), method.isAnnotationPresent(Primary.class), beanAnno.initMethod().isEmpty() ? null : beanAnno.initMethod(), beanAnno.destroyMethod().isEmpty() ? null : beanAnno.destroyMethod(), null, null);
+                addBeanDefinitions(beanDefinitionsMap, beanDefinition);
+            }
+        }
+    }
+```
+注意到`@Configuration`注解本身又用`@Component`注解修饰了，因此，对于一个`@Configuration`来说：
+```java
+@Configuration
+public class DateTimeConfig {
+    @Bean
+    LocalDateTime local() { return LocalDateTime.now(); }
+
+    @Bean
+    ZonedDateTime zoned() { return ZonedDateTime.now(); }
+}
+```
+实际上创建了3个`BeanDefinition`：
+
+* DateTimeConfig本身
+* LocalDateTime
+* ZonedDateTime
+
+不创建`DateTimeConfig`行不行？不行，因为后续没有`DateTimeConfig`的实例，无法调用`local()`和`zoned()`方法。因为当前我们只创建了`BeanDefinition`，所以对于`LocalDateTime`和`ZonedDateTime`的`BeanDefinition`来说，还必须保存`DateTimeConfig`的名字，将来才能通过名字查找`DateTimeConfig`的实例。
+
+我们同时存储了`initMethodName`和`initMethod`，以及`destroyMethodName`和`destroyMethod`，这是因为在`@Component`声明的`Bean`中，我们可以根据`@PostConstruct`和`@PreDestroy`直接拿到`Method`本身，而在`@Bean`声明的`Bean`中，我们拿不到`Method`，只能从`@Bean`注解提取出字符串格式的方法名称，因此，存储在`BeanDefinition`的方法名称与方法，其中总有一个为null。
+
+最后，仔细编写`BeanDefinition`的`toString()`方法，使之能打印出详细的信息。我们编写测试，运行，打印出每个`BeanDefinition`如下：
+```java
+16:10:29.552 [main] DEBUG top.kelecc.context.AnnotationConfigApplicationContext - 定义了bean: BeanDefinition [name=dateTimeConfig, beanClass=top.kelecc.config.DateTimeConfig, factory=null, init-method=null, destroy-method=null, primary=false, instance=null]
+16:10:29.552 [main] DEBUG top.kelecc.context.AnnotationConfigApplicationContext - 定义了bean: BeanDefinition [name=local, beanClass=java.time.LocalDateTime, factory=DateTimeConfig.local(), init-method=null, destroy-method=null, primary=false, instance=null]
+16:10:29.554 [main] DEBUG top.kelecc.context.AnnotationConfigApplicationContext - 定义了bean: BeanDefinition [name=zoned, beanClass=java.time.ZonedDateTime, factory=DateTimeConfig.zoned(), init-method=null, destroy-method=null, primary=false, instance=null]
+```
+现在，我们已经能扫描并创建所有的`BeanDefinition`，只是目前每个`BeanDefinition`内部的`instance`还是`null`，因为我们后续才会创建真正的Bean。
