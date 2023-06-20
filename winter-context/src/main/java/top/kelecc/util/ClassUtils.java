@@ -44,6 +44,7 @@ public class ClassUtils {
 
     /**
      * 通过注解获取类中的方法
+     *
      * @param clazz
      * @param anno
      * @return
@@ -52,11 +53,10 @@ public class ClassUtils {
     public static Method findAnnotationMethod(Class<?> clazz, Class<? extends Annotation> anno) {
         List<Method> methods = Arrays.stream(clazz.getDeclaredMethods())
                 .filter(method -> method.isAnnotationPresent(anno))
-                .map(method -> {
+                .peek(method -> {
                     if (method.getParameterCount() != 0) {
                         throw new BeanDefinitionException(String.format("被 '%s' 标注的 '%s' 方法不允许有参数。 '%s'", anno.getName(), method.getName(), clazz.getName()));
                     }
-                    return method;
                 })
                 .collect(Collectors.toList());
         if (methods.isEmpty()) {
@@ -65,6 +65,25 @@ public class ClassUtils {
         if (methods.size() == 1) {
             return methods.get(0);
         }
-        throw new BeanDefinitionException(String.format("在类 '%s' 中有多个方法被 '%s'注解标注！",clazz.getName(),anno.getName()));
+        throw new BeanDefinitionException(String.format("在类 '%s' 中有多个方法被 '%s'注解标注！", clazz.getName(), anno.getName()));
+    }
+
+    /**
+     * 获取注解
+     *
+     * @param annoClass
+     * @param paraAnno
+     * @param <A>
+     * @return
+     */
+    @Nullable
+    @SuppressWarnings("unchecked")
+    public static <A extends Annotation> A getAnnotation(Class<A> annoClass, Annotation[] paraAnno) {
+        for (Annotation annotation : paraAnno) {
+            if (annoClass.isInstance(annotation)) {
+                return (A) annotation;
+            }
+        }
+        return null;
     }
 }
