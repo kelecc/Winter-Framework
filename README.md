@@ -10,23 +10,16 @@
 > * 剩下的将进一步完善...
 
 # 实现IOC容器功能
-
-Spring的核心就是能管理一组Bean，并能自动配置依赖关系的IoC容器。而我们的**Winter Framework**的核心**context模块**
-就是要实现IoC容器。
+Spring的核心就是能管理一组Bean，并能自动配置依赖关系的IoC容器。而我们的**Winter Framework**的核心**context模块**就是要实现IoC容器。
 
 ---
 **设计目标**
 
-Spring的IoC容器分为两类：BeanFactory和ApplicationContext，前者总是延迟创建Bean，而后者则在启动时初始化所有Bean。实际使用时，99%都采用ApplicationContext，因此，Winter
-Framework仅实现ApplicationContext，不支持BeanFactory。
+Spring的IoC容器分为两类：BeanFactory和ApplicationContext，前者总是延迟创建Bean，而后者则在启动时初始化所有Bean。实际使用时，99%都采用ApplicationContext，因此，Winter Framework仅实现ApplicationContext，不支持BeanFactory。
 
-早期的Spring容器采用XML来配置Bean，后期又加入了自动扫描包的功能，即通过`<context:component-scan base-package="org.example"/>`
-的配置。再后来，又加入了Annotation配置，并通过`@ComponentScan`注解实现自动扫描。如果使用Spring
-Boot，则99%都采用`@ComponentScan`注解方式配置，因此，Winter Framework也仅实现Annotation配置+`@ComponentScan`扫描方式完成容器的配置。
+早期的Spring容器采用XML来配置Bean，后期又加入了自动扫描包的功能，即通过`<context:component-scan base-package="org.example"/>`的配置。再后来，又加入了Annotation配置，并通过`@ComponentScan`注解实现自动扫描。如果使用Spring Boot，则99%都采用`@ComponentScan`注解方式配置，因此，Winter Framework也仅实现Annotation配置+`@ComponentScan`扫描方式完成容器的配置。
 
-此外，Winter
-Framework仅支持Singleton类型的Bean，不支持Prototype类型的Bean，因为实际使用中，99%都采用Singleton。依赖注入则与Spring保持一致，支持构造方法、Setter方法与字段注入。支持`@Configuration`
-和`BeanPostProcessor`。至于Spring的其他功能，例如，层级容器、MessageSource、一个Bean允许多个名字等功能，一概不支持！
+此外，Winter Framework仅支持Singleton类型的Bean，不支持Prototype类型的Bean，因为实际使用中，99%都采用Singleton。依赖注入则与Spring保持一致，支持构造方法、Setter方法与字段注入。支持`@Configuration`和`BeanPostProcessor`。至于Spring的其他功能，例如，层级容器、MessageSource、一个Bean允许多个名字等功能，一概不支持！
 
 下表列出了Spring Framework和Winter Framework在IoC容器方面的异同：
 
@@ -975,11 +968,11 @@ public class AnnotationConfigApplicationContext {
 // 创建一个Bean，但不进行字段和方法级别的注入。如果创建的Bean不是Configuration，则在构造方法/工厂方法中注入的依赖Bean会自动创建
 public Object createBeanAsEarlySingleton(BeanDefinition def){
         if(!this.creatingBeanNames.add(def.getName())){
-        // 检测到重复创建Bean导致的循环依赖:
-        throw new UnsatisfiedDependencyException();
+            // 检测到重复创建Bean导致的循环依赖:
+            throw new UnsatisfiedDependencyException();
         }
         ...
-        }
+}
 ```
 
 由于`@Configuration`标识的Bean实际上是工厂，它们必须先实例化，才能实例化其他普通Bean，所以我们先把`@Configuration`
@@ -999,7 +992,7 @@ public AnnotationConfigApplicationContext(Class<?> configClass,PropertyResolver 
         createBeanPostProcessor();
         //5.创建普通bean
         createNormalBeans();
-        }
+}
 /**
  * 创建@Configuration的工厂类
  */
@@ -1008,7 +1001,7 @@ private void createConfigurationBean(){
         .filter(this::isConfigurationDefinition)
         .sorted()
         .forEach(this::createBeanAsEarlySingleton);
-        }
+}
 
 /**
  * 创建BeanPostProcessor
@@ -1020,7 +1013,7 @@ private void createBeanPostProcessor(){
         .map(beanDefinition->(BeanPostProcessor)createBeanAsEarlySingleton(beanDefinition))
         .collect(Collectors.toList());
         this.beanPostProcessors.addAll(collect);
-        }
+}
 
 /**
  * 创建普通bean
@@ -1030,124 +1023,124 @@ private void createNormalBeans(){
         .filter(def->Objects.isNull(def.getInstance()))
         .sorted()
         .forEach(def->{
-        // 如果Bean未被创建(可能在其他Bean的构造方法注入前被创建):
-        if(Objects.isNull(def.getInstance())){
-        this.createBeanAsEarlySingleton(def);
-        }
+            // 如果Bean未被创建(可能在其他Bean的构造方法注入前被创建):
+            if(Objects.isNull(def.getInstance())){
+                this.createBeanAsEarlySingleton(def);
+            }
         });
-        }
+}
 ```
 
 剩下的工作就是把`createBeanAsEarlySingleton()`补充完整：
 
 ```java
     /**
- * 创建早期单例
- *
- * @param beanDefinition
- * @return
- */
-private Object createBeanAsEarlySingleton(BeanDefinition beanDefinition){
-        logger.debug("尝试将Bean '{}': {} 创建为早期单例。",beanDefinition.getName(),beanDefinition.getBeanClass().getName());
+     * 创建早期单例
+     *
+     * @param beanDefinition
+     * @return
+     */
+    private Object createBeanAsEarlySingleton(BeanDefinition beanDefinition) {
+        logger.debug("尝试将Bean '{}': {} 创建为早期单例。", beanDefinition.getName(), beanDefinition.getBeanClass().getName());
         //检测是否产生循环依赖
-        if(!creatingBeanNames.add(beanDefinition.getName())){
-        throw new UnsatisfiedDependencyException(String.format("创建Bean '%s' 时检测到循环依赖。",beanDefinition.getName()));
+        if (!creatingBeanNames.add(beanDefinition.getName())) {
+            throw new UnsatisfiedDependencyException(String.format("创建Bean '%s' 时检测到循环依赖。", beanDefinition.getName()));
         }
         //创建方式，构造函数或工厂方法
         Executable createFn;
-        if(beanDefinition.getFactoryName()==null){
-        createFn=beanDefinition.getConstructor();
-        }else{
-        createFn=beanDefinition.getFactoryMethod();
+        if (beanDefinition.getFactoryName() == null) {
+            createFn = beanDefinition.getConstructor();
+        } else {
+            createFn = beanDefinition.getFactoryMethod();
         }
-//获取创建所需的参数
-final Parameter[]parameters=createFn.getParameters();
-final Annotation[][]parametersAnno=createFn.getParameterAnnotations();
-        Object[]args=new Object[parameters.length];
-final boolean isConfiguration=isConfigurationDefinition(beanDefinition);
-final boolean isBeanPostProcessor=isBeanPostProcessor(beanDefinition);
+        //获取创建所需的参数
+        final Parameter[] parameters = createFn.getParameters();
+        final Annotation[][] parametersAnno = createFn.getParameterAnnotations();
+        Object[] args = new Object[parameters.length];
+        final boolean isConfiguration = isConfigurationDefinition(beanDefinition);
+        final boolean isBeanPostProcessor = isBeanPostProcessor(beanDefinition);
         //遍历注入参数
-        for(int i=0;i<parameters.length;i++){
-final Parameter parameter=parameters[i];
-final Annotation[]paraAnno=parametersAnno[i];
-final Value valueAnno=ClassUtils.getAnnotation(Value.class,paraAnno);
-final Autowired autowiredAnno=ClassUtils.getAnnotation(Autowired.class,paraAnno);
+        for (int i = 0; i < parameters.length; i++) {
+            final Parameter parameter = parameters[i];
+            final Annotation[] paraAnno = parametersAnno[i];
+            final Value valueAnno = ClassUtils.getAnnotation(Value.class, paraAnno);
+            final Autowired autowiredAnno = ClassUtils.getAnnotation(Autowired.class, paraAnno);
 
-        // @Configuration类型的Bean是工厂，不允许使用@Autowired创建:
-        if(isConfiguration&&!Objects.isNull(autowiredAnno)){
-        throw new BeanCreationException(String.format("创建 @Configuration 类型的 Bean '%s' '%s' 时不能指定 @Autowired!",beanDefinition.getName(),beanDefinition.getBeanClass().getName()));
-        }
-        // BeanPostProcessor不能依赖其他的bean，不允许使用@Autowired创建
-        if(isBeanPostProcessor&&!Objects.isNull(autowiredAnno)){
-        throw new BeanCreationException(String.format("创建 BeanPostProcessor 类型的 Bean '%s' '%s' 时不能指定 @Autowired!",beanDefinition.getName(),beanDefinition.getBeanClass().getName()));
-        }
-        // 参数必须使用且只使用@Value或@Autowired其中一个
-        if(Objects.isNull(valueAnno)&&Objects.isNull(autowiredAnno)){
-        throw new BeanCreationException(String.format("创建 Bean '%s' '%s' 时必须使用且只使用@Value或者@Autowired的一个!",beanDefinition.getName(),beanDefinition.getBeanClass().getName()));
-        }
-        if(!Objects.isNull(valueAnno)&&!Objects.isNull(autowiredAnno)){
-        throw new BeanCreationException(String.format("创建 Bean '%s' '%s' 时必须使用且只使用@Value或者@Autowired的一个!",beanDefinition.getName(),beanDefinition.getBeanClass().getName()));
-        }
-final Class<?> type=parameter.getType();
-        if(!Objects.isNull(valueAnno)){
-        args[i]=this.propertyResolver.getProperty(valueAnno.value(),type);
-        }else{
-        //参数是@Autowired标注
-        String name=autowiredAnno.name();
-        boolean required=autowiredAnno.value();
-        //获取所依赖的BeanDefinition
-        BeanDefinition dependencyDefinition=name.isEmpty()?findBeanDefinition(type):findBeanDefinition(name,type);
-        //没找到依赖
-        if(required&&Objects.isNull(dependencyDefinition)){
-        throw new BeanCreationException(String.format("创建 bean '%s' '%s' 时缺少类型 '%s' 的bean进行自动装配。",beanDefinition.getName(),beanDefinition.getBeanClass().getName(),type.getName()));
-        }
-        if(dependencyDefinition!=null){
-        Object dependencyInstance=dependencyDefinition.getInstance();
-        if(dependencyInstance==null){
-        dependencyInstance=createBeanAsEarlySingleton(dependencyDefinition);
-        }
-        args[i]=dependencyInstance;
-        }else{
-        args[i]=null;
-        }
-        }
+            // @Configuration类型的Bean是工厂，不允许使用@Autowired创建:
+            if (isConfiguration && !Objects.isNull(autowiredAnno)) {
+                throw new BeanCreationException(String.format("创建 @Configuration 类型的 Bean '%s' '%s' 时不能指定 @Autowired!", beanDefinition.getName(), beanDefinition.getBeanClass().getName()));
+            }
+            // BeanPostProcessor不能依赖其他的bean，不允许使用@Autowired创建
+            if (isBeanPostProcessor && !Objects.isNull(autowiredAnno)) {
+                throw new BeanCreationException(String.format("创建 BeanPostProcessor 类型的 Bean '%s' '%s' 时不能指定 @Autowired!", beanDefinition.getName(), beanDefinition.getBeanClass().getName()));
+            }
+            // 参数必须使用且只使用@Value或@Autowired其中一个
+            if (Objects.isNull(valueAnno) && Objects.isNull(autowiredAnno)) {
+                throw new BeanCreationException(String.format("创建 Bean '%s' '%s' 时必须使用且只使用@Value或者@Autowired的一个!", beanDefinition.getName(), beanDefinition.getBeanClass().getName()));
+            }
+            if (!Objects.isNull(valueAnno) && !Objects.isNull(autowiredAnno)) {
+                throw new BeanCreationException(String.format("创建 Bean '%s' '%s' 时必须使用且只使用@Value或者@Autowired的一个!", beanDefinition.getName(), beanDefinition.getBeanClass().getName()));
+            }
+            final Class<?> type = parameter.getType();
+            if (!Objects.isNull(valueAnno)) {
+                args[i] = this.propertyResolver.getProperty(valueAnno.value(), type);
+            } else {
+                //参数是@Autowired标注
+                String name = autowiredAnno.name();
+                boolean required = autowiredAnno.value();
+                //获取所依赖的BeanDefinition
+                BeanDefinition dependencyDefinition = name.isEmpty() ? findBeanDefinition(type) : findBeanDefinition(name, type);
+                //没找到依赖
+                if (required && Objects.isNull(dependencyDefinition)) {
+                    throw new BeanCreationException(String.format("创建 bean '%s' '%s' 时缺少类型 '%s' 的bean进行自动装配。", beanDefinition.getName(), beanDefinition.getBeanClass().getName(), type.getName()));
+                }
+                if (dependencyDefinition != null) {
+                    Object dependencyInstance = dependencyDefinition.getInstance();
+                    if (dependencyInstance == null) {
+                        dependencyInstance = createBeanAsEarlySingleton(dependencyDefinition);
+                    }
+                    args[i] = dependencyInstance;
+                } else {
+                    args[i] = null;
+                }
+            }
         }
 
         //创建bean
         Object instance;
-        if(beanDefinition.getFactoryMethod()==null){
-        //用构造方法
-        try{
-        instance=beanDefinition.getConstructor().newInstance(args);
-        }catch(Exception e){
-        throw new BeanCreationException(String.format("创建Bean '%s': %s"+"时发生异常！",beanDefinition.getName(),beanDefinition.getBeanClass().getName()),e);
-        }
-        }else{
-        //用@Bean方法创建
-        Object configInstance=getBean(beanDefinition.getFactoryName());
-        try{
-        instance=beanDefinition.getFactoryMethod().invoke(configInstance,args);
-        }catch(Exception e){
-        throw new BeanCreationException(String.format("创建Bean '%s': %s"+"时发生异常！",beanDefinition.getName(),beanDefinition.getBeanClass().getName()),e);
-        }
+        if (beanDefinition.getFactoryMethod() == null) {
+            //用构造方法
+            try {
+                instance = beanDefinition.getConstructor().newInstance(args);
+            } catch (Exception e) {
+                throw new BeanCreationException(String.format("创建Bean '%s': %s" + "时发生异常！", beanDefinition.getName(), beanDefinition.getBeanClass().getName()), e);
+            }
+        } else {
+            //用@Bean方法创建
+            Object configInstance = getBean(beanDefinition.getFactoryName());
+            try {
+                instance = beanDefinition.getFactoryMethod().invoke(configInstance, args);
+            } catch (Exception e) {
+                throw new BeanCreationException(String.format("创建Bean '%s': %s" + "时发生异常！", beanDefinition.getName(), beanDefinition.getBeanClass().getName()), e);
+            }
         }
         //将创建的bean存入beanDefinition的instance
         beanDefinition.setInstance(instance);
 
         //调用BeanPostProcessor处理bean
-        for(BeanPostProcessor processor:beanPostProcessors){
-        Object processed=processor.postProcessBeforeInitialization(beanDefinition.getInstance(),beanDefinition.getName());
-        if(processed==null){
-        throw new BeanCreationException(String.format("PostBeanProcessor '%s' 处理Bean '%s' 时返回值为null!",processor,beanDefinition.getName()));
-        }
-        if(beanDefinition.getInstance()!=processed){
-        logger.debug("Bean '{}' 被post processor {} 替换了。",beanDefinition.getName(),processor.getClass().getName());
-        beanDefinition.setInstance(processed);
-        }
+        for (BeanPostProcessor processor : beanPostProcessors) {
+            Object processed = processor.postProcessBeforeInitialization(beanDefinition.getInstance(), beanDefinition.getName());
+            if (processed == null) {
+                throw new BeanCreationException(String.format("PostBeanProcessor '%s' 处理Bean '%s' 时返回值为null!", processor, beanDefinition.getName()));
+            }
+            if (beanDefinition.getInstance() != processed) {
+                logger.debug("Bean '{}' 被post processor {} 替换了。", beanDefinition.getName(), processor.getClass().getName());
+                beanDefinition.setInstance(processed);
+            }
         }
 
         return instance;
-        }
+    }
 ```
 
 注意到递归调用：
@@ -1157,17 +1150,17 @@ public Object createBeanAsEarlySingleton(BeanDefinition def){
         ...
         Object[]args=new Object[parameters.length];
         for(int i=0;i<parameters.length;i++){
-        ...
-        // 获取依赖Bean的实例:
-        Object autowiredBeanInstance=dependsOnDef.getInstance();
-        if(autowiredBeanInstance==null&&!isConfiguration){
-        // 当前依赖Bean尚未初始化，递归调用初始化该依赖Bean:
-        autowiredBeanInstance=createBeanAsEarlySingleton(dependsOnDef);
+            ...
+            // 获取依赖Bean的实例:
+            Object autowiredBeanInstance=dependsOnDef.getInstance();
+            if(autowiredBeanInstance==null&&!isConfiguration){
+                // 当前依赖Bean尚未初始化，递归调用初始化该依赖Bean:
+                autowiredBeanInstance=createBeanAsEarlySingleton(dependsOnDef);
+            }
+            ...
         }
         ...
-        }
-        ...
-        }
+}
 ```
 
 假设如下的Bean依赖：
