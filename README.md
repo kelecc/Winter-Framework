@@ -117,16 +117,16 @@ public class ResourceResolver {
 注意到`scan()`方法传入了一个映射函数，我们传入`Resource`到Class Name的映射，就可以扫描出Class Name：
 ```java
 // 定义一个扫描器:
-ResourceResolver rr=new ResourceResolver("org.example");
-        List<String> classList=rr.scan(res->{
-        String name=res.name(); // 资源名称"org/example/Hello.class"
-        if(name.endsWith(".class")){ // 如果以.class结尾
+ResourceResolver rr = new ResourceResolver("org.example");
+List<String> classList = rr.scan(res -> {
+   String name = res.name(); // 资源名称"org/example/Hello.class"
+   if (name.endsWith(".class")) { // 如果以.class结尾
         // 把"org/example/Hello.class"变为"org.example.Hello":
-        return name.substring(0,name.length()-6).replace("/",".").replace("\\",".");
-        }
-        // 否则返回null表示不是有效的Class Name:
-        return null;
-        });
+        return name.substring(0, name.length() - 6).replace("/", ".").replace("\\", ".");
+   }
+   // 否则返回null表示不是有效的Class Name:
+   return null;
+});
 ```
 这样，`ResourceResolver`只负责扫描并列出所有文件，由客户端决定是找出`.class`文件，还是找出`.properties`文件。
 
@@ -808,8 +808,8 @@ public class DateTimeConfig {
 
 ```java
 16:10:29.552[main]DEBUG top.kelecc.context.AnnotationConfigApplicationContext-定义了bean:BeanDefinition[name=dateTimeConfig,beanClass=top.kelecc.config.DateTimeConfig,factory=null,init-method=null,destroy-method=null,primary=false,instance=null]
-        16:10:29.552[main]DEBUG top.kelecc.context.AnnotationConfigApplicationContext-定义了bean:BeanDefinition[name=local,beanClass=java.time.LocalDateTime,factory=DateTimeConfig.local(),init-method=null,destroy-method=null,primary=false,instance=null]
-        16:10:29.554[main]DEBUG top.kelecc.context.AnnotationConfigApplicationContext-定义了bean:BeanDefinition[name=zoned,beanClass=java.time.ZonedDateTime,factory=DateTimeConfig.zoned(),init-method=null,destroy-method=null,primary=false,instance=null]
+16:10:29.552[main]DEBUG top.kelecc.context.AnnotationConfigApplicationContext-定义了bean:BeanDefinition[name=local,beanClass=java.time.LocalDateTime,factory=DateTimeConfig.local(),init-method=null,destroy-method=null,primary=false,instance=null]
+16:10:29.554[main]DEBUG top.kelecc.context.AnnotationConfigApplicationContext-定义了bean:BeanDefinition[name=zoned,beanClass=java.time.ZonedDateTime,factory=DateTimeConfig.zoned(),init-method=null,destroy-method=null,primary=false,instance=null]
 ```
 
 现在，我们已经能扫描并创建所有的`BeanDefinition`，只是目前每个`BeanDefinition`内部的`instance`还是`null`
@@ -921,10 +921,10 @@ class B {
 ```java
 // 第一步,实例化:
 A a=new A();
-        B b=new B();
+B b=new B();
 // 第二步,注入:
-        a.b=b;
-        b.a=a;
+a.b=b;
+b.a=a;
 ```
 
 所以，对于IoC容器来说，创建Bean的过程分两步：
@@ -1213,107 +1213,96 @@ class C {
 6. 检测到依赖C，已就绪；
 7. 完成创建A。
    可见无论以什么顺序创建，C总是最先被实例化，A总是最后被实例化。
-
 ## 5.初始化bean
-
-在创建Bean实例的过程中，我们已经完成了强依赖的注入。下一步，是根据Setter方法和字段完成弱依赖注入，接着调用用`@PostConstruct`
-标注的init方法，就完成了所有Bean的初始化。
+在创建Bean实例的过程中，我们已经完成了强依赖的注入。下一步，是根据Setter方法和字段完成弱依赖注入，接着调用用`@PostConstruct`标注的init方法，就完成了所有Bean的初始化。
 
 这一步相对比较简单，因为只涉及到查找依赖的`@Value`和`@Autowired`，然后用反射完成调用即可：
-
 ```java
-    public AnnotationConfigApplicationContext(Class<?> configClass,PropertyResolver propertyResolver){
+    public AnnotationConfigApplicationContext(Class<?> configClass, PropertyResolver propertyResolver) {
         ...
         //6.通过set方法和字段注入
         logger.debug("================开始set方法和字段注入================");
         this.beans.values().forEach(this::injectBean);
         //7.调用所有bean的init方法
         logger.debug("================开始调用所有bean的init方法================");
-        this.beans.values().stream().filter(beanDefinition->!beanDefinition.isInit()).forEach(this::initBean);
+        this.beans.values().stream().filter(beanDefinition -> !beanDefinition.isInit()).forEach(this::initBean);
         ...
-        }
+    }
 ```
-
-使用Setter方法和字段注入时，要注意一点，就是不仅要在当前类查找，还要在父类查找，因为有些`@Autowired`
-写在父类，所有子类都可使用，这样更方便。注入弱依赖代码如下：
-
+使用Setter方法和字段注入时，要注意一点，就是不仅要在当前类查找，还要在父类查找，因为有些`@Autowired`写在父类，所有子类都可使用，这样更方便。注入弱依赖代码如下：
 ```java
 // 在当前类及父类进行字段和方法注入:
-void injectProperties(BeanDefinition def,Class<?> clazz,Object bean){
-        // 在当前类查找Field和Method并注入:
-        for(Field f:clazz.getDeclaredFields()){
-        tryInjectProperties(def,clazz,bean,f);
-        }
-        for(Method m:clazz.getDeclaredMethods()){
-        tryInjectProperties(def,clazz,bean,m);
-        }
-        // 在父类查找Field和Method并注入:
-        Class<?> superClazz=clazz.getSuperclass();
-        if(superClazz!=null){
+void injectProperties(BeanDefinition def, Class<?> clazz, Object bean) {
+    // 在当前类查找Field和Method并注入:
+    for (Field f : clazz.getDeclaredFields()) {
+        tryInjectProperties(def, clazz, bean, f);
+    }
+    for (Method m : clazz.getDeclaredMethods()) {
+        tryInjectProperties(def, clazz, bean, m);
+    }
+    // 在父类查找Field和Method并注入:
+    Class<?> superClazz = clazz.getSuperclass();
+    if (superClazz != null) {
         // 递归调用:
-        injectProperties(def,superClazz,bean);
-        }
-        }
+        injectProperties(def, superClazz, bean);
+    }
+}
 
 // 注入单个属性
-        void tryInjectProperties(BeanDefinition def,Class<?> clazz,Object bean,AccessibleObject acc){
-        ...
-        }
+void tryInjectProperties(BeanDefinition def, Class<?> clazz, Object bean, AccessibleObject acc) {
+    ...
+}
 ```
-
 弱依赖注入完成后，再循环一遍所有的`BeanDefinition`，对其调用`init`方法，完成最后一步初始化：
-
 ```java
     /**
- * 调用init方法
- *
- * @param beanDefinition
- */
-private void initBean(BeanDefinition beanDefinition){
-        Object instance=getProxyInstance(beanDefinition);
-        callInitMethod(beanDefinition,instance);
+     * 调用init方法
+     *
+     * @param beanDefinition
+     */
+    private void initBean(BeanDefinition beanDefinition) {
+        Object instance = getProxyInstance(beanDefinition);
+        callInitMethod(beanDefinition, instance);
 
         //调用BeanPostProcessor.postProcessAfterInitialization():
-        beanPostProcessors.forEach(beanPostProcessor->{
-        //Todo BeanProcessor处理bean
+        beanPostProcessors.forEach(beanPostProcessor -> {
+            //Todo BeanProcessor处理bean
         });
-        }
+    }
 ```
-
 处理`@PreDestroy`方法更简单，在`ApplicationContext`关闭时遍历所有`Bean`，调用`destroy`方法即可:
-
 ```java
     //ApplicationContext接口继承了AutoCloseable接口
-@Override
-public void close(){
+    @Override
+    public void close() {
         logger.debug("IOC容器关闭，开始执行bean的destroy方法进行销毁...");
-        this.beans.values().forEach(beanDefinition->{
-        Object instance=getProxyInstance(beanDefinition);
-        callDestroyMethod(beanDefinition,instance);
+        this.beans.values().forEach(beanDefinition -> {
+            Object instance = getProxyInstance(beanDefinition);
+            callDestroyMethod(beanDefinition, instance);
         });
-        }
+    }
 
-private void callDestroyMethod(BeanDefinition def,Object instance){
-        String destroyMethodName=def.destroyMethodName;
-        Method destroyMethod=def.destroyMethod;
-        if(!Objects.isNull(destroyMethod)){
-        try{
-        destroyMethod.invoke(instance);
-        logger.debug("bean: '{}': {} 已经销毁!",def.getName(),def.getBeanClass().getName());
-        }catch(Exception e){
-        throw new BeanCreationException(e);
+    private void callDestroyMethod(BeanDefinition def, Object instance) {
+        String destroyMethodName = def.destroyMethodName;
+        Method destroyMethod = def.destroyMethod;
+        if (!Objects.isNull(destroyMethod)) {
+            try {
+                destroyMethod.invoke(instance);
+                logger.debug("bean: '{}': {} 已经销毁!", def.getName(), def.getBeanClass().getName());
+            } catch (Exception e) {
+                throw new BeanCreationException(e);
+            }
+        } else if (!Objects.isNull(destroyMethodName)) {
+            String factoryName = def.getFactoryName();
+            BeanDefinition factoryDef = findBeanDefinition(factoryName);
+            Method method = ClassUtils.getMethodByName(factoryDef.getBeanClass(), destroyMethodName);
+            method.setAccessible(true);
+            try {
+                method.invoke(factoryDef.getInstance());
+                logger.debug("bean: '{}': {} 已经销毁!", def.getName(), def.getBeanClass().getName());
+            } catch (Exception e) {
+                throw new BeanCreationException(e);
+            }
         }
-        }else if(!Objects.isNull(destroyMethodName)){
-        String factoryName=def.getFactoryName();
-        BeanDefinition factoryDef=findBeanDefinition(factoryName);
-        Method method=ClassUtils.getMethodByName(factoryDef.getBeanClass(),destroyMethodName);
-        method.setAccessible(true);
-        try{
-        method.invoke(factoryDef.getInstance());
-        logger.debug("bean: '{}': {} 已经销毁!",def.getName(),def.getBeanClass().getName());
-        }catch(Exception e){
-        throw new BeanCreationException(e);
-        }
-        }
-        }
+    }
 ```

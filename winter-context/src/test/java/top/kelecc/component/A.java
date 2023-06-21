@@ -25,12 +25,10 @@ public class A {
 
     @Value("${a.name}")
     public String aName;
-
     //构造注入
     public A(@Value("${a.age}") String age) {
         this.age = age;
     }
-
     //set注入
     @Value("${a.tel}")
     public void setTel(String tel) {
