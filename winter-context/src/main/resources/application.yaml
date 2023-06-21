@@ -13,3 +13,6 @@ a:
   tel: 19999999999
 b:
   name: 我是2B,呜呜
+app:
+  title: WinterFramework
+  version: 1.0

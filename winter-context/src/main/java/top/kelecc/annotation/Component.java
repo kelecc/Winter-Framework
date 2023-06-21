@@ -14,6 +14,7 @@ import java.lang.annotation.*;
 public @interface Component {
     /**
      * Bean名字，默认为简化类名的首字母小写的驼峰命名
+     *
      * @return
      */
     String value() default "";

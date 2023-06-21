@@ -76,7 +76,7 @@ public class PropertyResolver {
         try {
             target = (T) mapper.apply(value);
         } catch (Exception e) {
-            throw new ClassCastException("类型转换失败：java.lang.String("+ value +")====>" + targetType.getName());
+            throw new ClassCastException("类型转换失败：java.lang.String(" + value + ")====>" + targetType.getName());
         }
         return target;
     }
@@ -84,9 +84,9 @@ public class PropertyResolver {
     /**
      * 初始化converters
      */
-    private void initConverters(){
-        converters.put(int.class,Integer::parseInt);
-        converters.put(Integer.class,Integer::valueOf);
+    private void initConverters() {
+        converters.put(int.class, Integer::parseInt);
+        converters.put(Integer.class, Integer::valueOf);
 
         converters.put(byte.class, Byte::parseByte);
         converters.put(Byte.class, Byte::valueOf);
@@ -125,9 +125,10 @@ public class PropertyResolver {
     /**
      * 向PropertyResolver中注册converter
      */
-    public   void registerConverter(Map<Class<?>, Function<String, Object>> newConverters){
+    public void registerConverter(Map<Class<?>, Function<String, Object>> newConverters) {
         this.converters.putAll(newConverters);
     }
+
     /**
      * 解析key是否是`${}`这种格式的
      *

@@ -58,6 +58,7 @@ public class YamlUtils {
         }
     }
 }
+
 /**
  * Disable ALL implicit convert and treat all values as string.
  */

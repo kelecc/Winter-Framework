@@ -22,7 +22,7 @@ import java.util.stream.Collectors;
  * @description:
  * @date 2023/6/19 14:07
  */
-public class AnnotationConfigApplicationContext implements ApplicationContext {
+public class AnnotationConfigApplicationContext implements ConfigurableApplicationContext {
     private final Map<String, BeanDefinition> beans;
     private final PropertyResolver propertyResolver;
     private final Set<String> creatingBeanNames;
@@ -30,6 +30,7 @@ public class AnnotationConfigApplicationContext implements ApplicationContext {
     private final List<BeanPostProcessor> beanPostProcessors = new ArrayList<>();
 
     public AnnotationConfigApplicationContext(Class<?> configClass, PropertyResolver propertyResolver) {
+        ApplicationContextUtils.setApplicationContext(this);
         this.propertyResolver = propertyResolver;
         logger.debug("================开始扫描所有字节码================");
         //1.扫描获取所有的class类型
@@ -66,12 +67,14 @@ public class AnnotationConfigApplicationContext implements ApplicationContext {
      * @param beanDefinition
      */
     private void initBean(BeanDefinition beanDefinition) {
-        Object instance = getProxyInstance(beanDefinition);
+        Object instance = getProxiedInstance(beanDefinition);
         callInitMethod(beanDefinition, instance);
 
         //调用BeanPostProcessor.postProcessAfterInitialization():
         beanPostProcessors.forEach(beanPostProcessor -> {
-            //Todo BeanProcessor处理bean
+            Object processedInstance = beanPostProcessor.postProcessAfterInitialization(beanDefinition.getInstance(), beanDefinition.getName());
+            logger.debug("{}的postProcessAfterInitialization方法将{} 替换成了 {}", beanPostProcessor.getClass().getSimpleName(), beanDefinition.getInstance().getClass().getName(), processedInstance.getClass().getName());
+            beanDefinition.setInstance(processedInstance);
         });
     }
 
@@ -104,7 +107,7 @@ public class AnnotationConfigApplicationContext implements ApplicationContext {
      * @param beanDefinition
      */
     private void injectBean(BeanDefinition beanDefinition) {
-        final Object instance = getProxyInstance(beanDefinition);
+        final Object instance = getProxiedInstance(beanDefinition);
         try {
             injectProperties(beanDefinition, beanDefinition.getBeanClass(), instance);
         } catch (ReflectiveOperationException e) {
@@ -224,10 +227,17 @@ public class AnnotationConfigApplicationContext implements ApplicationContext {
         }
     }
 
-    private Object getProxyInstance(BeanDefinition beanDefinition) {
+    private Object getProxiedInstance(BeanDefinition beanDefinition) {
         Object instance = beanDefinition.getInstance();
-        //Todo BeanPostProcessor
-
+        //如果Proxy改变了原始Bean，又希望注入到原始Bean，则由BeanPostProcessor指定原始Bean:
+        ArrayList<BeanPostProcessor> reversedBeanPostProcessors = new ArrayList<>(this.beanPostProcessors);
+        Collections.reverse(reversedBeanPostProcessors);
+        for (BeanPostProcessor beanPostProcessor : reversedBeanPostProcessors) {
+            Object restoredInstance = beanPostProcessor.postProcessOnSetProperty(beanDefinition.getInstance(), beanDefinition.getName());
+            if (restoredInstance != instance) {
+                instance = restoredInstance;
+            }
+        }
         return instance;
     }
 
@@ -284,7 +294,8 @@ public class AnnotationConfigApplicationContext implements ApplicationContext {
      * @param beanDefinition
      * @return
      */
-    private Object createBeanAsEarlySingleton(BeanDefinition beanDefinition) {
+    @Override
+    public Object createBeanAsEarlySingleton(BeanDefinition beanDefinition) {
         logger.debug("尝试将Bean '{}': {} 创建为早期单例。", beanDefinition.getName(), beanDefinition.getBeanClass().getName());
         //检测是否产生循环依赖
         if (!creatingBeanNames.add(beanDefinition.getName())) {
@@ -383,7 +394,7 @@ public class AnnotationConfigApplicationContext implements ApplicationContext {
             }
         }
 
-        return instance;
+        return beanDefinition.getInstance();
     }
 
     private boolean isBeanPostProcessor(BeanDefinition beanDefinition) {
@@ -741,11 +752,14 @@ public class AnnotationConfigApplicationContext implements ApplicationContext {
 
     @Override
     public void close() {
-        logger.debug("IOC容器关闭，开始执行bean的destroy方法进行销毁...");
+        logger.debug("IOC容器开始关闭，开始执行bean的destroy方法进行销毁...");
         this.beans.values().forEach(beanDefinition -> {
-            Object instance = getProxyInstance(beanDefinition);
+            Object instance = getProxiedInstance(beanDefinition);
             callDestroyMethod(beanDefinition, instance);
         });
+        this.beans.clear();
+        logger.debug("IOC容器已经关闭！");
+        ApplicationContextUtils.setApplicationContext(null);
     }
 
     private void callDestroyMethod(BeanDefinition def, Object instance) {

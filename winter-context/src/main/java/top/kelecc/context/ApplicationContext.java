@@ -2,6 +2,9 @@ package top.kelecc.context;
 
 import java.util.List;
 
+/**
+ * @author 可乐
+ */
 public interface ApplicationContext extends AutoCloseable {
 
     /**

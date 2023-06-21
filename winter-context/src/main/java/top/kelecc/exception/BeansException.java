@@ -6,7 +6,7 @@ package top.kelecc.exception;
  * @description:
  * @date 2023/6/19 15:39
  */
-public class BeansException extends NestedRuntimeException{
+public class BeansException extends NestedRuntimeException {
     public BeansException() {
     }
 

@@ -14,6 +14,7 @@ import java.lang.annotation.*;
 public @interface ComponentScan {
     /**
      * 包扫描路径，默认为当前包以及同目录子包
+     *
      * @return
      */
     String[] value() default {};

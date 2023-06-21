@@ -6,7 +6,7 @@ package top.kelecc.exception;
  * @description:
  * @date 2023/6/19 16:03
  */
-public class BeanCreationException extends BeansException{
+public class BeanCreationException extends BeansException {
     public BeanCreationException() {
     }
 

@@ -6,7 +6,7 @@ package top.kelecc.exception;
  * @description:
  * @date 2023/6/19 15:38
  */
-public class NoUniqueBeanDefinitionException extends BeanDefinitionException{
+public class NoUniqueBeanDefinitionException extends BeanDefinitionException {
     public NoUniqueBeanDefinitionException() {
     }
 
