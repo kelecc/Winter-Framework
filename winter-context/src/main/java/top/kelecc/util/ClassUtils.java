@@ -86,4 +86,12 @@ public class ClassUtils {
         }
         return null;
     }
+
+    public static Method getMethodByName(Class<?> aClass, String initMethodName) {
+        try {
+            return aClass.getDeclaredMethod(initMethodName);
+        } catch (NoSuchMethodException e) {
+            throw new BeanDefinitionException(String.format("类：%s 中未找到名为： '%s' 的方法！", aClass.getName(), initMethodName));
+        }
+    }
 }

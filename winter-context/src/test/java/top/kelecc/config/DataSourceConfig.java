@@ -14,10 +14,10 @@ import top.kelecc.annotation.Component;
 public class DataSourceConfig {
     @PreDestroy
     public void preDestroy(){
-        System.out.println("preDestroy........................");
+        System.out.println("数据库连接已全部释放！");
     }
     @PostConstruct
     public void postConstruct(){
-        System.out.println("postConstruct........................");
+        System.out.println("数据源初始化完成，我用的MySQL!");
     }
 }

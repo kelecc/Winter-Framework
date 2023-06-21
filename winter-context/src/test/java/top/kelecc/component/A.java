@@ -12,14 +12,45 @@ import top.kelecc.annotation.Value;
  */
 @Component
 public class A {
+    //Autowired注入
+    @Autowired
     public B b;
+    //构造注入
+    public String age;
+    //@Value属性注入
+    @Value("${a.sex}")
+    public String sex;
+    //set注入
+    public String tel;
 
-
-    public A(@Autowired B b, @Value("${name.a}") String aName) {
-        this.b = b;
-        this.aName = aName;
-    }
-
+    @Value("${a.name}")
     public String aName;
 
+    //构造注入
+    public A(@Value("${a.age}") String age) {
+        this.age = age;
+    }
+
+    //set注入
+    @Value("${a.tel}")
+    public void setTel(String tel) {
+        this.tel = tel;
+    }
+
+    @Override
+    public String toString() {
+        final StringBuilder sb = new StringBuilder("{");
+        sb.append("\"b\":")
+                .append(b);
+        sb.append(",\"age\":").append(age == null ? "" : "\"")
+                .append(age).append(age == null ? "" : "\"");
+        sb.append(",\"sex\":").append(sex == null ? "" : "\"")
+                .append(sex).append(sex == null ? "" : "\"");
+        sb.append(",\"tel\":").append(tel == null ? "" : "\"")
+                .append(tel).append(tel == null ? "" : "\"");
+        sb.append(",\"aName\":").append(aName == null ? "" : "\"")
+                .append(aName).append(aName == null ? "" : "\"");
+        sb.append('}');
+        return sb.toString();
+    }
 }

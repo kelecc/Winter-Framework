@@ -1,6 +1,5 @@
 package top.kelecc.component;
 
-import top.kelecc.annotation.Autowired;
 import top.kelecc.annotation.Component;
 import top.kelecc.annotation.Value;
 
@@ -12,12 +11,15 @@ import top.kelecc.annotation.Value;
  */
 @Component
 public class B {
-    private C c;
-
+    @Value("${b.name}")
     public String bName;
 
-    public B(@Autowired C c, @Value("${name.b}") String bName) {
-        this.c = c;
-        this.bName = bName;
+    @Override
+    public String toString() {
+        final StringBuilder sb = new StringBuilder("{");
+        sb.append("\"bName\":").append(bName == null ? "" : "\"")
+                .append(bName).append(bName == null ? "" : "\"");
+        sb.append('}');
+        return sb.toString();
     }
 }

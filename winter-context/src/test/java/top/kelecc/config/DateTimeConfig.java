@@ -15,9 +15,9 @@ public class DateTimeConfig {
     ZonedDateTime zoned() { return ZonedDateTime.now(); }
 
     public void zonedInit(){
-        System.out.println("zonedInit.........................");
+        System.out.println("ZonedDateTime初始化！");
     }
     public void zonedDestroy(){
-        System.out.println("zonedDestroy.........................");
+        System.out.println("ZonedDateTime开始销毁...");
     }
 }

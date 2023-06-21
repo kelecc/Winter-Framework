@@ -31,17 +31,204 @@ public class AnnotationConfigApplicationContext implements ApplicationContext {
 
     public AnnotationConfigApplicationContext(Class<?> configClass, PropertyResolver propertyResolver) {
         this.propertyResolver = propertyResolver;
+        logger.debug("================开始扫描所有字节码================");
         //1.扫描获取所有的class类型
         Set<String> classNames = scanForClassNames(configClass);
+        logger.debug("================开始扫描字节码中的注解================");
         //2.扫描所有字节码中的注解，创建BeanDefinition
         this.beans = createBeanDefinitions(classNames);
         this.creatingBeanNames = new HashSet<>();
         //3.创建@Configuration的工厂类,由于@Configuration标识的Bean实际上是工厂，它们必须先实例化，才能实例化其他普通Bean，所以我们先把@Configuration标识的Bean创建出来，再创建普通Bean。
+        logger.debug("================开始创建@Configuration配置类================");
         createConfigurationBean();
         //4.创建BeanPostProcessor
+        logger.debug("================开始创建BeanPostProcessor================");
         createBeanPostProcessor();
         //5.创建普通bean
+        logger.debug("================开始创建普通Bean================");
         createNormalBeans();
+        //6.通过set方法和字段注入
+        logger.debug("================开始set方法和字段注入================");
+        this.beans.values().forEach(this::injectBean);
+        //7.调用所有bean的init方法
+        logger.debug("================开始调用所有bean的init方法================");
+        this.beans.values().stream().filter(beanDefinition -> !beanDefinition.isInit()).forEach(this::initBean);
+        if (logger.isDebugEnabled()) {
+            this.beans.values().stream().sorted().forEach(def -> {
+                logger.debug("bean 初始化结果: {}", def);
+            });
+        }
+    }
+
+    /**
+     * 调用init方法
+     *
+     * @param beanDefinition
+     */
+    private void initBean(BeanDefinition beanDefinition) {
+        Object instance = getProxyInstance(beanDefinition);
+        callInitMethod(beanDefinition, instance);
+
+        //调用BeanPostProcessor.postProcessAfterInitialization():
+        beanPostProcessors.forEach(beanPostProcessor -> {
+            //Todo BeanProcessor处理bean
+        });
+    }
+
+    private void callInitMethod(BeanDefinition def, Object instance) {
+        String initMethodName = def.initMethodName;
+        Method initMethod = def.initMethod;
+        if (!Objects.isNull(initMethod)) {
+            try {
+                initMethod.invoke(instance);
+            } catch (Exception e) {
+                throw new BeanCreationException(e);
+            }
+        } else if (!Objects.isNull(initMethodName)) {
+            String factoryName = def.getFactoryName();
+            BeanDefinition factoryDef = findBeanDefinition(factoryName);
+            Method method = ClassUtils.getMethodByName(factoryDef.getBeanClass(), initMethodName);
+            method.setAccessible(true);
+            try {
+                method.invoke(factoryDef.getInstance());
+            } catch (Exception e) {
+                throw new BeanCreationException(e);
+            }
+        }
+        def.setInit();
+    }
+
+    /**
+     * 注入依赖但不调用init方法
+     *
+     * @param beanDefinition
+     */
+    private void injectBean(BeanDefinition beanDefinition) {
+        final Object instance = getProxyInstance(beanDefinition);
+        try {
+            injectProperties(beanDefinition, beanDefinition.getBeanClass(), instance);
+        } catch (ReflectiveOperationException e) {
+            throw new BeanCreationException(e);
+        }
+    }
+
+    /**
+     * 注入属性
+     *
+     * @param def
+     * @param clazz
+     * @param instance
+     * @throws ReflectiveOperationException
+     */
+    private void injectProperties(BeanDefinition def, Class<?> clazz, Object instance) throws ReflectiveOperationException {
+        for (Method method : clazz.getDeclaredMethods()) {
+            tryInjectProperties(def, method, instance);
+        }
+        for (Field field : clazz.getDeclaredFields()) {
+            tryInjectProperties(def, field, instance);
+        }
+        // 在父类查找Field和Method并注入:
+        Class<?> superclass = clazz.getSuperclass();
+        if (!Objects.isNull(superclass)) {
+            injectProperties(def, superclass, instance);
+        }
+    }
+
+    /**
+     * 注入单个属性
+     *
+     * @param def
+     * @param accessibleObject Field或者Method
+     * @param instance
+     */
+    private void tryInjectProperties(BeanDefinition def, AccessibleObject accessibleObject, Object instance) throws ReflectiveOperationException {
+        Value valueAnno = accessibleObject.getAnnotation(Value.class);
+        Autowired autowiredAnno = accessibleObject.getAnnotation(Autowired.class);
+        //不是需要注入的属性或方法
+        if (Objects.isNull(valueAnno) && Objects.isNull(autowiredAnno)) {
+            return;
+        }
+        Field field = null;
+        Method method = null;
+        if (accessibleObject instanceof Field) {
+            Field f = (Field) accessibleObject;
+            //检测需注入的属性是否支持注入
+            checkFieldOrMethod(f);
+            f.setAccessible(true);
+            field = f;
+        }
+        if (accessibleObject instanceof Method) {
+            Method m = (Method) accessibleObject;
+            //检测需注入的方法是否支持注入
+            checkFieldOrMethod(m);
+            if (m.getParameterCount() != 1) {
+                throw new BeanDefinitionException(String.format("无法为 bean '%s' : %s 注入非 setter 方法: %s", def.getName(), def.getBeanClass().getName(), m.getName()));
+            }
+            m.setAccessible(true);
+            method = m;
+        }
+
+        String accessibleName = field == null ? method.getName() : field.getName();
+        Class<?> accessibleType = field == null ? method.getParameterTypes()[0] : field.getType();
+
+        if (!Objects.isNull(valueAnno) && !Objects.isNull(autowiredAnno)) {
+            throw new BeanDefinitionException(String.format("注入bean '%s': %s 的 %s.%s 时不能同时有@Autowired和@Value!", def.getName(), def.getBeanClass().getName(), def.getBeanClass().getSimpleName(), accessibleName));
+        }
+
+        //@Value注入
+        if (!Objects.isNull(valueAnno)) {
+            Object property = this.propertyResolver.getProperty(valueAnno.value(), accessibleType);
+            if (!Objects.isNull(field)) {
+                logger.debug("使用@Value进行属性注入：{}.{} = {}", def.getBeanClass().getName(), accessibleName, property);
+                field.set(instance, property);
+            }
+            if (!Objects.isNull(method)) {
+                logger.debug("使用@Value进行方法注入：{}.{} = {}", def.getBeanClass().getName(), accessibleName, property);
+                method.invoke(instance, property);
+            }
+        }
+        //@Autowired注入
+        if (!Objects.isNull(autowiredAnno)) {
+            String name = autowiredAnno.name();
+            boolean required = autowiredAnno.value();
+            Object dependency = name.isEmpty() ? findBean(accessibleType) : findBean(name, accessibleType);
+            if (Objects.isNull(dependency) && required) {
+                throw new UnsatisfiedDependencyException(String.format("注入 %s: %s 时未找到依赖的bean: '%s': %s", def.getBeanClass().getSimpleName(), accessibleName, def.getName(), def.getBeanClass().getName()));
+            }
+            if (!Objects.isNull(dependency)) {
+                if (!Objects.isNull(method)) {
+                    logger.debug("使用@Autowired进行方法注入：{}.{} = {}", def.getBeanClass().getName(), accessibleName, dependency);
+                    method.invoke(instance, dependency);
+                }
+                if (!Objects.isNull(field)) {
+                    logger.debug("使用@Autowired进行属性注入：{}.{} = {}", def.getBeanClass().getName(), accessibleName, dependency);
+                    field.set(instance, dependency);
+                }
+            }
+        }
+
+    }
+
+    private void checkFieldOrMethod(Member m) {
+        int mods = m.getModifiers();
+        if (Modifier.isStatic(mods)) {
+            throw new BeanDefinitionException("不能在静态属性上注入：" + m);
+        }
+        if (Modifier.isFinal(mods)) {
+            if (m instanceof Field) {
+                throw new BeanDefinitionException("不能在final属性上注入：" + m);
+            }
+            if (m instanceof Method) {
+                logger.warn("对于注入的 final 方法需要小心，因为当 bean 被代理时，该方法不会在目标 bean 上被调用，可能会导致空指针异常。");
+            }
+        }
+    }
+
+    private Object getProxyInstance(BeanDefinition beanDefinition) {
+        Object instance = beanDefinition.getInstance();
+        //Todo BeanPostProcessor
+
+        return instance;
     }
 
     /**
@@ -554,6 +741,34 @@ public class AnnotationConfigApplicationContext implements ApplicationContext {
 
     @Override
     public void close() {
+        logger.debug("IOC容器关闭，开始执行bean的destroy方法进行销毁...");
+        this.beans.values().forEach(beanDefinition -> {
+            Object instance = getProxyInstance(beanDefinition);
+            callDestroyMethod(beanDefinition, instance);
+        });
+    }
 
+    private void callDestroyMethod(BeanDefinition def, Object instance) {
+        String destroyMethodName = def.destroyMethodName;
+        Method destroyMethod = def.destroyMethod;
+        if (!Objects.isNull(destroyMethod)) {
+            try {
+                destroyMethod.invoke(instance);
+                logger.debug("bean: '{}': {} 已经销毁!", def.getName(), def.getBeanClass().getName());
+            } catch (Exception e) {
+                throw new BeanCreationException(e);
+            }
+        } else if (!Objects.isNull(destroyMethodName)) {
+            String factoryName = def.getFactoryName();
+            BeanDefinition factoryDef = findBeanDefinition(factoryName);
+            Method method = ClassUtils.getMethodByName(factoryDef.getBeanClass(), destroyMethodName);
+            method.setAccessible(true);
+            try {
+                method.invoke(factoryDef.getInstance());
+                logger.debug("bean: '{}': {} 已经销毁!", def.getName(), def.getBeanClass().getName());
+            } catch (Exception e) {
+                throw new BeanCreationException(e);
+            }
+        }
     }
 }
