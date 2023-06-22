@@ -615,7 +615,7 @@ public class AnnotationConfigApplicationContext implements ConfigurableApplicati
      * @return BeanDefinition
      */
     @Nullable
-    BeanDefinition findBeanDefinition(String name, Class<?> requiredType) {
+    public BeanDefinition findBeanDefinition(String name, Class<?> requiredType) {
         BeanDefinition beanDefinition = findBeanDefinition(name);
         if (Objects.isNull(beanDefinition)) {
             return null;
@@ -633,7 +633,7 @@ public class AnnotationConfigApplicationContext implements ConfigurableApplicati
      * @return BeanDefinition
      */
     @Nullable
-    BeanDefinition findBeanDefinition(String name) {
+    public BeanDefinition findBeanDefinition(String name) {
         return this.beans.get(name);
     }
 
@@ -644,7 +644,7 @@ public class AnnotationConfigApplicationContext implements ConfigurableApplicati
      * @return BeanDefinition
      */
     @Nullable
-    BeanDefinition findBeanDefinition(Class<?> type) {
+    public BeanDefinition findBeanDefinition(Class<?> type) {
         List<BeanDefinition> defs = findBeanDefinitions(type);
         //没找到任何BeanDefinition
         if (defs.isEmpty()) {
@@ -675,7 +675,7 @@ public class AnnotationConfigApplicationContext implements ConfigurableApplicati
      * @param type 想要找的类型
      * @return BeanDefinition列表
      */
-    List<BeanDefinition> findBeanDefinitions(Class<?> type) {
+    public List<BeanDefinition> findBeanDefinitions(Class<?> type) {
         return this.beans.values().stream().filter(def -> type.isAssignableFrom(def.getBeanClass())).sorted().collect(Collectors.toList());
     }
 

@@ -1,21 +1,21 @@
-package top.kelecc.util;
+package top.kelecc.winter.util;
 
 import org.junit.jupiter.api.Test;
+import top.kelecc.util.YamlUtils;
 
 import java.util.Map;
 
-/**
- * @author 可乐
- * @version 1.0
- * @description:
- * @date 2023/6/18 20:35
- */
-public class YamlUtilsTest {
+import static org.junit.jupiter.api.Assertions.*;
+
+class YamlUtilsTest {
+
+    @Test
+    void loadYamlAsPlainMap() {
+    }
 
     @Test
     public void loadYamlTest(){
         Map<String, Object> map = YamlUtils.loadYamlAsPlainMap("application.yaml");
         System.out.println(map.get("kele.lover.name"));
     }
-
 }
