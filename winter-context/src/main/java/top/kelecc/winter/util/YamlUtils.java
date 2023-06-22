@@ -19,9 +19,8 @@ import java.util.Map;
  * @date 2023/6/18 20:23
  */
 public class YamlUtils {
-    @SuppressWarnings("unchecked")
     public static Map<String, Object> loadYamlAsPlainMap(String path) {
-        try (InputStream inputStream = Thread.currentThread().getContextClassLoader().getResourceAsStream("application.yaml")) {
+        try (InputStream inputStream = Thread.currentThread().getContextClassLoader().getResourceAsStream(path)) {
 
             LoaderOptions loaderOptions = new LoaderOptions();
             DumperOptions dumperOptions = new DumperOptions();
