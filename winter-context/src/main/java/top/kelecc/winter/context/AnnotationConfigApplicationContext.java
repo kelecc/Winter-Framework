@@ -32,27 +32,27 @@ public class AnnotationConfigApplicationContext implements ConfigurableApplicati
     public AnnotationConfigApplicationContext(Class<?> configClass, PropertyResolver propertyResolver) {
         ApplicationContextUtils.setApplicationContext(this);
         this.propertyResolver = propertyResolver;
-        logger.debug("================开始扫描所有字节码================");
+        logger.debug("======================开始扫描所有字节码======================");
         //1.扫描获取所有的class类型
         Set<String> classNames = scanForClassNames(configClass);
-        logger.debug("================开始扫描字节码中的注解================");
+        logger.debug("============开始扫描字节码中的注解创建BeanDefinition============");
         //2.扫描所有字节码中的注解，创建BeanDefinition
         this.beans = createBeanDefinitions(classNames);
         this.creatingBeanNames = new HashSet<>();
         //3.创建@Configuration的工厂类,由于@Configuration标识的Bean实际上是工厂，它们必须先实例化，才能实例化其他普通Bean，所以我们先把@Configuration标识的Bean创建出来，再创建普通Bean。
-        logger.debug("================开始创建@Configuration配置类================");
+        logger.debug("=================开始创建@Configuration配置类=================");
         createConfigurationBean();
         //4.创建BeanPostProcessor
-        logger.debug("================开始创建BeanPostProcessor================");
+        logger.debug("==================开始创建BeanPostProcessor==================");
         createBeanPostProcessor();
         //5.创建普通bean
-        logger.debug("================开始创建普通Bean================");
+        logger.debug("=======================开始创建普通Bean=======================");
         createNormalBeans();
         //6.通过set方法和字段注入
-        logger.debug("================开始set方法和字段注入================");
+        logger.debug("=====================开始set方法和字段注入=====================");
         this.beans.values().forEach(this::injectBean);
         //7.调用所有bean的init方法
-        logger.debug("================开始调用所有bean的init方法================");
+        logger.debug("===================开始调用所有bean的init方法===================");
         this.beans.values().stream().filter(beanDefinition -> !beanDefinition.isInit()).forEach(this::initBean);
         if (logger.isDebugEnabled()) {
             this.beans.values().stream().sorted().forEach(def -> {
