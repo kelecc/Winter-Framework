@@ -2,7 +2,7 @@ package top.kelecc.config;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
-import top.kelecc.annotation.Component;
+import top.kelecc.winter.annotation.Component;
 
 /**
  * @author 可乐

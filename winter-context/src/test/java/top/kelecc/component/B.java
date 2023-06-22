@@ -1,7 +1,7 @@
 package top.kelecc.component;
 
-import top.kelecc.annotation.Component;
-import top.kelecc.annotation.Value;
+import top.kelecc.winter.annotation.Component;
+import top.kelecc.winter.annotation.Value;
 
 /**
  * @author 可乐

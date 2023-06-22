@@ -1,11 +1,8 @@
 package top.kelecc.winter.util;
 
 import org.junit.jupiter.api.Test;
-import top.kelecc.util.YamlUtils;
 
 import java.util.Map;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 class YamlUtilsTest {
 

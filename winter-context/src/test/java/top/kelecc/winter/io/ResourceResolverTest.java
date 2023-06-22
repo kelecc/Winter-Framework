@@ -1,7 +1,6 @@
 package top.kelecc.winter.io;
 
 import org.junit.jupiter.api.Test;
-import top.kelecc.io.ResourceResolver;
 
 import java.util.List;
 

@@ -2,9 +2,9 @@ package top.kelecc.component;
 
 import org.junit.jupiter.api.Test;
 import top.kelecc.App;
-import top.kelecc.context.AnnotationConfigApplicationContext;
-import top.kelecc.io.PropertyResolver;
-import top.kelecc.util.YamlUtils;
+import top.kelecc.winter.context.AnnotationConfigApplicationContext;
+import top.kelecc.winter.io.PropertyResolver;
+import top.kelecc.winter.util.YamlUtils;
 
 import java.util.Map;
 import java.util.Properties;

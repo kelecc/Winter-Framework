@@ -1,8 +1,8 @@
 package top.kelecc.component;
 
-import top.kelecc.annotation.Component;
-import top.kelecc.annotation.Order;
-import top.kelecc.context.BeanPostProcessor;
+import top.kelecc.winter.annotation.Component;
+import top.kelecc.winter.annotation.Order;
+import top.kelecc.winter.context.BeanPostProcessor;
 
 import java.util.HashMap;
 import java.util.Map;

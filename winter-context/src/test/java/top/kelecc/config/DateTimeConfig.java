@@ -1,7 +1,7 @@
 package top.kelecc.config;
 
-import top.kelecc.annotation.Bean;
-import top.kelecc.annotation.Configuration;
+import top.kelecc.winter.annotation.Bean;
+import top.kelecc.winter.annotation.Configuration;
 
 import java.time.LocalDateTime;
 import java.time.ZonedDateTime;

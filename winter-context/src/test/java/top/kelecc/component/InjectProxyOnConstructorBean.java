@@ -1,7 +1,7 @@
 package top.kelecc.component;
 
-import top.kelecc.annotation.Autowired;
-import top.kelecc.annotation.Component;
+import top.kelecc.winter.annotation.Autowired;
+import top.kelecc.winter.annotation.Component;
 
 @Component
 public class InjectProxyOnConstructorBean {

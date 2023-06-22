@@ -9,7 +9,7 @@
 > * boot模块：实现一个简化版的“Spring Boot”，用于打包运行。
 > * 剩下的将进一步完善...
 
-# 实现IOC容器功能
+# 实现IoC容器功能
 Spring的核心就是能管理一组Bean，并能自动配置依赖关系的IoC容器。而我们的**Winter Framework**的核心**context模块**就是要实现IoC容器。
 
 ---
@@ -1275,7 +1275,7 @@ void tryInjectProperties(BeanDefinition def, Class<?> clazz, Object bean, Access
     //ApplicationContext接口继承了AutoCloseable接口
     @Override
     public void close() {
-        logger.debug("IOC容器关闭，开始执行bean的destroy方法进行销毁...");
+        logger.debug("IoC容器关闭，开始执行bean的destroy方法进行销毁...");
         this.beans.values().forEach(beanDefinition -> {
             Object instance = getProxyInstance(beanDefinition);
             callDestroyMethod(beanDefinition, instance);
@@ -1790,3 +1790,6 @@ BeanFactory
 其实根本原因是我们大幅简化了需求。Spring最早提供了`BeanFactory`和`ApplicationContext`两种容器，前者是懒加载，后者是立刻初始化所有Bean。懒加载的特性会导致依赖注入变得更加复杂，虽然`BeanFactory`在实际项目中并没有什么卵用。然而一旦发布了接口，处于兼容性考虑，就没法再收回去了。再考虑到Spring最早采用XML配置，后来采用`Annotation`配置，还允许混合配置，这样一来，早期发布的`XmlApplicationContext`不能动，新的`Annotation`配置就必须添加新的实现类，所以，代码的复杂度随着需求增加而增加，保持兼容性又会导致需要更多的代码来实现新功能。
 
 所以，没事不要瞎提需求。
+# 实现AOP
+实现了IoC容器后，我们继续实现AOP功能。
+
