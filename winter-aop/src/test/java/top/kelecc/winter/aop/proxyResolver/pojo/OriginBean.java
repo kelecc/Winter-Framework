@@ -1,11 +1,10 @@
-package top.kelecc.winter.aop.pojo;
+package top.kelecc.winter.aop.proxyResolver.pojo;
 
-import top.kelecc.winter.aop.annotation.Kele;
-
+import top.kelecc.winter.annotation.Enhanced;
+@Enhanced("allProxyHandler")
 public class OriginBean {
     public String name;
 
-    @Kele
     public String hello() {
         return "Hello, " + name + ".";
     }

@@ -19,9 +19,9 @@
 
     <dependencies>
         <dependency>
-            <groupId>com.itranswarp.summer</groupId>
-            <artifactId>summer-context</artifactId>
-            <version>1.0.3</version>
+            <groupId>top.kelecc</groupId>
+            <artifactId>winter-context</artifactId>
+            <version>1.0</version>
         </dependency>
 
         <dependency>

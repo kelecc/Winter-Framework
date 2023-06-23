@@ -1937,3 +1937,243 @@ public class PoliteInvocationHandler implements InvocationHandler {
         assertEquals("Morning, bavov14.", proxyBean.morning());
 ```
 测试通过，本节结束。
+
+## 2. 实现Around、Before、After
+现在我们已经实现了ProxyResolver，下一步，实现完整的AOP就很容易了。
+
+我们先从客户端代码入手，看看应当怎么装配AOP。
+
+首先，客户端需要定义一个原始Bean，例如`OriginBean`，用`@Enhanced`注解标注，在需要增强的方法上标注`@Around`：
+```java
+@Component
+@Enhanced("aroundInvocationHandler")
+public class OriginBean {
+
+    @Value("${gu.name}")
+    public String name;
+
+    @Around
+    public String hello(String uname) {
+        return "Hello, " + uname + ".";
+    }
+
+    public String morning(String uname) {
+        return "Morning, " + uname + ".";
+    }
+}
+```
+`@Enhanced`注解的值`aroundInvocationHandler`指出应该按什么名字查找拦截器，因此，客户端应再定义一个`AroundInvocationHandler`：
+```java
+@Component
+public class AroundInvocationHandler extends AroundInvocationHandlerAdapter {
+    @Override
+    public void before(Object proxy, Method method, Object[] args) {
+        args[0] = "傻杯" + args[0];
+    }
+
+    @Override
+    public Object after(Object proxy, Object returnValue, Method method, Object[] args) {
+        return returnValue + "今天下大雨啦！";
+    }
+}
+```
+有了原始Bean、拦截器，就可以在IoC容器中装配AOP,注意到装配AOP是通过`EnhancedProxyBeanPostProcessor`实现的，而这个类是由Framework提供，客户端并不需要自己实现。因此，我们需要开发一个`EnhancedProxyBeanPostProcessor`：
+```java
+@Component
+public class EnhancedProxyBeanPostProcessor implements BeanPostProcessor {
+
+    Map<String, Object> originBeans = new HashMap<>();
+
+    public Object postProcessBeforeInitialization(Object bean, String beanName) throws BeansException {
+        Class<?> beanClass = bean.getClass();
+        // 检测@Enhanced注解:
+        Enhanced anno = beanClass.getAnnotation(Enhanced.class);
+        if (anno != null) {
+            String handlerName;
+            try {
+                handlerName = (String) anno.annotationType().getMethod("value").invoke(anno);
+            } catch (ReflectiveOperationException e) {
+                throw new AopConfigException();
+            }
+            Object proxy = createProxy(beanClass, bean, handlerName);
+            originBeans.put(beanName, bean);
+            return proxy;
+        } else {
+            return bean;
+        }
+    }
+
+    Object createProxy(Class<?> beanClass, Object bean, String handlerName) {
+        ConfigurableApplicationContext ctx = (ConfigurableApplicationContext) ApplicationContextUtils.getRequiredApplicationContext();
+        BeanDefinition def = ctx.findBeanDefinition(handlerName);
+        if (def == null) {
+            throw new AopConfigException();
+        }
+        Object handlerBean = def.getInstance();
+        if (handlerBean == null) {
+            handlerBean = ctx.createBeanAsEarlySingleton(def);
+        }
+        if (handlerBean instanceof InvocationHandler handler) {
+            return ProxyResolver.getInstance().createProxy(bean, handler);
+        } else {
+            throw new AopConfigException();
+        }
+    }
+
+    @Override
+    public Object postProcessOnSetProperty(Object bean, String beanName) {
+        Object origin = this.originBeans.get(beanName);
+        return origin != null ? origin : bean;
+    }
+}
+```
+上述`EnhancedProxyBeanPostProcessor`的机制非常简单：检测每个Bean实例是否带有`@Enhanced`注解，如果有，就根据注解的值查找Bean作为`InvocationHandler`，最后根据方法上是否有`@Around`创建Proxy，返回前保存了原始Bean的引用，因为IoC容器在后续的注入阶段要把相关依赖和值注入到原始Bean。
+
+总结一下，Winter Framework提供的包括：
+
+* `Enhanced`注解；
+* `EnhancedProxyBeanPostProcessor`实现AOP。
+客户端代码需要提供的包括：
+
+带`@Enhanced`注解的原始Bean；
+实现`AroundInvocationHandlerAdapter`的Bean，名字与`@Enhanced`注解`value`保持一致。
+没有额外的要求了。
+
+**实现Before和After**
+Spring提供的AOP拦截器，有`Around`、`Before`和`After`等好几种。如何实现`Before`和`After`拦截？
+
+实际上`Around`拦截本身就包含了`Before`和`After`拦截，我们没必要去修改`ProxyResolver`，只需要用`Adapter`模式提供两个拦截器模版，一个是`BeforeInvocationHandlerAdapter`：
+```java
+public abstract class BeforeInvocationHandlerAdapter implements InvocationHandler {
+    /**
+     * 前置通知
+     *
+     * @param proxy
+     * @param method
+     * @param args
+     */
+    public abstract void before(Object proxy, Method method, Object[] args);
+
+    @Override
+    public final Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+        Before before = method.getAnnotation(Before.class);
+        if (before != null) {
+            before(proxy, method, args);
+        }
+        return method.invoke(proxy, args);
+    }
+}
+```
+客户端提供的`InvocationHandler`只需继承自`BeforeInvocationHandlerAdapter`，自然就需要覆写`before()`方法，实现了Before拦截。
+
+After拦截也是一个拦截器模版：
+```java
+public abstract class AfterInvocationHandlerAdapter implements InvocationHandler {
+    /**
+     * 后置通知
+     * @param proxy
+     * @param returnValue
+     * @param method
+     * @param args
+     * @return
+     */
+    public abstract Object after(Object proxy, Object returnValue, Method method, Object[] args);
+
+    @Override
+    public final Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+        After after = method.getAnnotation(After.class);
+        if (after != null) {
+            Object ret = method.invoke(proxy, args);
+            return after(proxy, ret, method, args);
+        }
+        return method.invoke(proxy, args);
+    }
+}
+```
+
+注意：使用这三种方式拦截，必须要在对应的方法上加上`@Around`、`@Before`、`@After`注解，并且要加正确，否则会出现拦截失效的情况！
+
+扩展Annotation
+截止目前，客户端只需要定义带有`@Around`注解的Bean，就能自动触发AOP。我们思考下Spring的事务机制，其实也是AOP拦截，不过它的注解是`@Transactional`。如果要扩展Annotation，即能自定义注解来启动AOP，怎么做？
+
+假设我们后续编写了一个事务模块，提供注解`@Transactional`，那么，要启动AOP，就必须仿照`EnhancedProxyBeanPostProcessor`，提供一个`TransactionProxyBeanPostProcessor`，不过复制代码太麻烦了，我们可以改造一下`EnhancedProxyBeanPostProcessor`，用泛型代码处理Annotation，先抽象出一个`AnnotationProxyBeanPostProcessor`：
+```java
+public abstract class AnnotationProxyBeanPostProcessor<A extends Annotation> implements BeanPostProcessor {
+    Map<String, Object> originBeans = new HashMap<>();
+    Class<A> annotationClass;
+    public AnnotationProxyBeanPostProcessor() {
+        this.annotationClass = getParameterizedType();
+    }
+    @Override
+    public Object postProcessBeforeInitialization(Object bean, String beanName) {
+        Class<?> beanClass = bean.getClass();
+        A anno = beanClass.getAnnotation(annotationClass);
+        if (anno != null) {
+            String handlerName;
+            try {
+                handlerName = (String) anno.annotationType().getMethod("value").invoke(anno);
+            } catch (ReflectiveOperationException e) {
+                throw new AopConfigException(String.format("@%s 必须有value()方法且返回值是String.", this.annotationClass.getSimpleName()), e);
+            }
+            Object proxy = this.createProxy(beanClass,bean,handlerName);
+            originBeans.put(beanName,bean);
+            return proxy;
+        }
+        return bean;
+    }
+
+    private Object createProxy(Class<?> beanClass, Object bean, String handlerName) {
+        ConfigurableApplicationContext ctx = (ConfigurableApplicationContext) ApplicationContextUtils.getRequiredApplicationContext();
+        BeanDefinition beanDefinition = ctx.findBeanDefinition(handlerName);
+        if (Objects.isNull(beanDefinition)) {
+            throw new AopConfigException(String.format("处理bean: %s 时未找到handler: '%s'",beanClass.getName(),handlerName));
+        }
+        Object handler = beanDefinition.getInstance();
+        if (Objects.isNull(handler)) {
+            handler = ctx.createBeanAsEarlySingleton(beanDefinition);
+        }
+        if (handler instanceof InvocationHandler) {
+            return ProxyResolver.getInstance().creatProxy(bean, (InvocationHandler) handler);
+        } else {
+            throw new AopConfigException(String.format("处理bean: %s 时handler实例化异常，@Around中标注的类不是InvocationHandler实现类！",beanClass.getName()));
+        }
+    }
+
+    @Override
+    public Object postProcessOnSetProperty(Object bean, String beanName) {
+        Object originBean = this.originBeans.get(beanName);
+        return originBean == null ? bean : originBean;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Class<A> getParameterizedType() {
+        Type type = getClass().getGenericSuperclass();
+        if (!(type instanceof ParameterizedType)) {
+            throw new IllegalArgumentException("Class " + getClass().getName() + " does not have parameterized type.");
+        }
+        ParameterizedType pt = (ParameterizedType) type;
+        Type[] types = pt.getActualTypeArguments();
+        if (types.length != 1) {
+            throw new IllegalArgumentException("Class " + getClass().getName() + " has more than 1 parameterized types.");
+        }
+        Type r = types[0];
+        if (!(r instanceof Class<?>)) {
+            throw new IllegalArgumentException("Class " + getClass().getName() + " does not have parameterized type of class.");
+        }
+        return (Class<A>) r;
+    }
+}
+```
+实现`EnhancedProxyBeanPostProcessor`就一行定义：
+```java
+@Component
+public class EnhancedProxyBeanPostProcessor extends AnnotationProxyBeanPostProcessor<Enhanced> {
+}
+```
+后续如果我们想实现`@Transactional`注解，只需定义：
+```java
+@Component
+public class TransactionalProxyBeanPostProcessor extends AnnotationProxyBeanPostProcessor<Transactional> {
+}
+```
+就能自动根据@Transactional启动AOP。

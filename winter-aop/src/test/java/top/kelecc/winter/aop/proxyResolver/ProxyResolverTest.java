@@ -1,8 +1,9 @@
-package top.kelecc.winter.aop;
+package top.kelecc.winter.aop.proxyResolver;
 
 import org.junit.jupiter.api.Test;
-import top.kelecc.winter.aop.handler.PoliteInvocationHandler;
-import top.kelecc.winter.aop.pojo.OriginBean;
+import top.kelecc.winter.aop.ProxyResolver;
+import top.kelecc.winter.aop.proxyResolver.handler.AllProxyHandler;
+import top.kelecc.winter.aop.proxyResolver.pojo.OriginBean;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -23,9 +24,7 @@ class ProxyResolverTest {
 
         //创建proxy
         ProxyResolver proxyResolver = ProxyResolver.getInstance();
-        OriginBean proxyBean = proxyResolver.creatProxy(originBean, new PoliteInvocationHandler());
-
-        System.out.println(proxyBean.getClass().getName());
+        OriginBean proxyBean = proxyResolver.creatProxy(originBean, new AllProxyHandler());
 
         //proxy类和OriginBean不同
         assertNotSame(OriginBean.class, proxyBean.getClass());
@@ -36,7 +35,7 @@ class ProxyResolverTest {
         //调用带@Kele的方法
         assertEquals("Hello, bavov14!(被可乐修改！)", proxyBean.hello());
         //不带@Kele的方法
-        assertEquals("Morning, bavov14.", proxyBean.morning());
+        assertEquals("Morning, bavov14!(被可乐修改！)", proxyBean.morning());
 
     }
 }
