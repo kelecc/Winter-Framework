@@ -23,7 +23,7 @@ Spring的IoC容器分为两类：BeanFactory和ApplicationContext，前者总是
 
 下表列出了Spring Framework和Winter Framework在IoC容器方面的异同：
 
-| 功能     | 	Spring Framework                 | 	Summer Framework      |
+| 功能     | 	Spring Framework                 | 	Winter Framework      |
 |:-------|:----------------------------------|:-----------------------|
 | IoC容器  | 	支持BeanFactory和ApplicationContext | 	仅支持ApplicationContext |
 | 配置方式   | 	支持XML与Annotation                 | 	仅支持Annotation         |
