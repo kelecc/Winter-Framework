@@ -19,6 +19,7 @@ import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertSame;
 
+
 class JdbcTemplateTest {
 
     @BeforeAll
@@ -54,7 +55,7 @@ class JdbcTemplateTest {
     void updateInsertTest() {
         ApplicationContext ctx = ApplicationContextUtils.getRequiredApplicationContext();
         JdbcTemplate jdbcTemplate = ctx.getBean("jdbcTemplate");
-        int update = jdbcTemplate.update("INSERT INTO `xiyou` (id,name,age) VALUES (2, '雪碧', 23), (3, '芬达', 23);");
+        int update = jdbcTemplate.update("INSERT INTO `xiyou` (name,age) VALUES ('雪碧', 23), ('芬达', 23);");
         assertSame(2, update);
     }
 
@@ -85,4 +86,14 @@ class JdbcTemplateTest {
         BigInteger number = (BigInteger) jdbcTemplate.updateAndReturnGeneratedKey("INSERT INTO `xiyou` (name,age) VALUES (?, ?);", "青梅绿茶", 23);
         Assertions.assertEquals(15, number.intValue());
     }
+
+    @Test
+    void transactional() {
+        ApplicationContext ctx = ApplicationContextUtils.getRequiredApplicationContext();
+        Service service = ctx.getBean("service");
+        int i = service.transactional();
+        Assertions.assertEquals(2,i);
+
+    }
+
 }

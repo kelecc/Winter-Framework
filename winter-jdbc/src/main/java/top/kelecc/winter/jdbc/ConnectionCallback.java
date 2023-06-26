@@ -1,4 +1,4 @@
-package top.kelecc.winter.annotation;
+package top.kelecc.winter.jdbc;
 
 import java.sql.Connection;
 import java.sql.SQLException;

@@ -8,6 +8,9 @@ import top.kelecc.winter.annotation.Configuration;
 import top.kelecc.winter.annotation.Value;
 import top.kelecc.winter.context.ApplicationContextUtils;
 import top.kelecc.winter.jdbc.JdbcTemplate;
+import top.kelecc.winter.jdbc.tx.DataSourceTransactionManager;
+import top.kelecc.winter.jdbc.tx.PlatformTransactionManager;
+import top.kelecc.winter.jdbc.tx.TransactionalBeanPostProcessor;
 
 import javax.sql.DataSource;
 
@@ -30,7 +33,7 @@ public class JdbcConfiguration {
             @Value("${winter.datasource.connection-timeout:30000}") int connTimeout
     ) {
         HikariConfig config = new HikariConfig();
-        config.setAutoCommit(true);
+        config.setAutoCommit(false);
         config.setJdbcUrl(url);
         config.setUsername(username);
         config.setPassword(password);
@@ -46,6 +49,15 @@ public class JdbcConfiguration {
     @Bean
     public JdbcTemplate jdbcTemplate(@Autowired DataSource dataSource) {
         return new JdbcTemplate(dataSource);
+    }
+
+    @Bean
+    public TransactionalBeanPostProcessor transactionalBeanPostProcessor() {
+        return new TransactionalBeanPostProcessor();
+    }
+    @Bean
+    public PlatformTransactionManager platformTransactionManager(@Autowired DataSource dataSource) {
+        return new DataSourceTransactionManager(dataSource);
     }
 
     public void dataSourceClose() {

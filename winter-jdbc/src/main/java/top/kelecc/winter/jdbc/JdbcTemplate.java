@@ -1,8 +1,8 @@
 package top.kelecc.winter.jdbc;
 
 import jakarta.annotation.Nullable;
-import top.kelecc.winter.annotation.ConnectionCallback;
 import top.kelecc.winter.exception.DataAccessException;
+import top.kelecc.winter.jdbc.tx.TransactionalUtils;
 
 import javax.sql.DataSource;
 import java.sql.*;
@@ -102,8 +102,25 @@ public class JdbcTemplate {
     }
 
     public <T> T execute(ConnectionCallback<T> action) throws DataAccessException {
+        //尝试获取当前事务
+        Connection currentConnection = TransactionalUtils.getCurrentConnection();
+        if (currentConnection != null) {
+            try {
+                return action.doInConnection(currentConnection);
+            } catch (SQLException e) {
+                throw new DataAccessException(e);
+            }
+        }
         try (Connection connection = dataSource.getConnection()) {
-            return action.doInConnection(connection);
+            final boolean autoCommit = connection.getAutoCommit();
+            if (!autoCommit) {
+                connection.setAutoCommit(true);
+            }
+            T t = action.doInConnection(connection);
+            if (!autoCommit) {
+                connection.setAutoCommit(false);
+            }
+            return t;
         } catch (SQLException e) {
             throw new DataAccessException(e);
         }
