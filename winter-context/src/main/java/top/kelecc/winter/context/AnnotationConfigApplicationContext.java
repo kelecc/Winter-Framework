@@ -233,7 +233,8 @@ public class AnnotationConfigApplicationContext implements ConfigurableApplicati
         ArrayList<BeanPostProcessor> reversedBeanPostProcessors = new ArrayList<>(this.beanPostProcessors);
         Collections.reverse(reversedBeanPostProcessors);
         for (BeanPostProcessor beanPostProcessor : reversedBeanPostProcessors) {
-            Object restoredInstance = beanPostProcessor.postProcessOnSetProperty(beanDefinition.getInstance(), beanDefinition.getName());
+
+            Object restoredInstance = beanPostProcessor.postProcessOnSetProperty(instance, beanDefinition.getName());
             if (restoredInstance != instance) {
                 instance = restoredInstance;
             }
