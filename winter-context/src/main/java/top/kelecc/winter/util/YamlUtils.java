@@ -20,25 +20,27 @@ import java.util.Map;
  * @date 2023/6/18 20:23
  */
 public class YamlUtils {
-    public static Map<String, Object> loadYamlAsPlainMap(String path) {
-        try (InputStream inputStream = Thread.currentThread().getContextClassLoader().getResourceAsStream(path)) {
-            if (inputStream == null) {
-                throw new FileNotFoundException(String.format("yaml文件: '%s' 不存在！", path));
-            }
-            LoaderOptions loaderOptions = new LoaderOptions();
-            DumperOptions dumperOptions = new DumperOptions();
-            Representer representer = new Representer(dumperOptions);
-            NoImplicitResolver resolver = new NoImplicitResolver();
-            // 读取 application.yaml 文件
-            Yaml yaml = new Yaml(new Constructor(loaderOptions), representer, dumperOptions, loaderOptions, resolver);
-            Map<String, Object> configMap = yaml.load(inputStream);
-            // 遍历嵌套 Map，将嵌套层级为一级的数据提取到新的 Map 中
-            Map<String, Object> flattenedMap = new HashMap<>();
-            flattenMap("", configMap, flattenedMap);
-            return flattenedMap;
+    public static Map<String, Object> loadYamlAsPlainMap(String path) throws FileNotFoundException {
+        InputStream inputStream = ClassPathUtils.getContextClassLoader().getResourceAsStream(path);
+        if (inputStream == null) {
+            throw new FileNotFoundException(String.format("yaml文件: '%s' 不存在！", path));
+        }
+        LoaderOptions loaderOptions = new LoaderOptions();
+        DumperOptions dumperOptions = new DumperOptions();
+        Representer representer = new Representer(dumperOptions);
+        NoImplicitResolver resolver = new NoImplicitResolver();
+        // 读取 application.yaml 文件
+        Yaml yaml = new Yaml(new Constructor(loaderOptions), representer, dumperOptions, loaderOptions, resolver);
+        Map<String, Object> configMap = yaml.load(inputStream);
+        // 遍历嵌套 Map，将嵌套层级为一级的数据提取到新的 Map 中
+        Map<String, Object> flattenedMap = new HashMap<>();
+        flattenMap("", configMap, flattenedMap);
+        try {
+            inputStream.close();
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+        return flattenedMap;
     }
 
     /**

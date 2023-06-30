@@ -6,6 +6,7 @@ import top.kelecc.winter.context.AnnotationConfigApplicationContext;
 import top.kelecc.winter.io.PropertyResolver;
 import top.kelecc.winter.util.YamlUtils;
 
+import java.io.FileNotFoundException;
 import java.util.Map;
 import java.util.Properties;
 
@@ -20,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.*;
 public class BeanPostProcessorProxyTest {
 
     @Test
-    public void InjectProxyTest() {
+    public void InjectProxyTest() throws FileNotFoundException {
         Map<String, Object> map = YamlUtils.loadYamlAsPlainMap("application.yaml");
         Properties properties = new Properties();
         properties.putAll(map);

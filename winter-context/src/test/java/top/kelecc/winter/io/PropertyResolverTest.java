@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import top.kelecc.winter.util.YamlUtils;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -39,7 +40,7 @@ public class PropertyResolverTest {
     }
 
     @Test
-    public void loadYamlTest(){
+    public void loadYamlTest() throws FileNotFoundException {
         Map<String, Object> map = YamlUtils.loadYamlAsPlainMap("application.yaml");
         Properties properties = new Properties();
         properties.putAll(map);
