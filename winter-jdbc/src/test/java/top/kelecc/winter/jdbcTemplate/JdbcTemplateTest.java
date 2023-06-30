@@ -13,6 +13,7 @@ import top.kelecc.winter.jdbc.JdbcTemplate;
 import top.kelecc.winter.jdbcTemplate.bean.Xiyou;
 import top.kelecc.winter.util.YamlUtils;
 
+import java.io.FileNotFoundException;
 import java.math.BigInteger;
 import java.util.List;
 import java.util.Properties;
@@ -23,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 class JdbcTemplateTest {
 
     @BeforeAll
-    static void init() {
+    static void init() throws FileNotFoundException {
         Properties props = new Properties();
         props.putAll(YamlUtils.loadYamlAsPlainMap("application.yaml"));
         AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext(App.class, new PropertyResolver(props));
