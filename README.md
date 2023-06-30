@@ -2177,3 +2177,376 @@ public class TransactionalProxyBeanPostProcessor extends AnnotationProxyBeanPost
 }
 ```
 就能自动根据@Transactional启动AOP。
+
+# 实现JDBC和事务
+我们已经实现了IoC容器和AOP功能，在此基础上增加JDBC和事务的支持就比较容易了。
+
+Spring对JDBC数据库的支持主要包括：
+
+1. 提供了一个`JdbcTemplate`和`NamedParameterJdbcTemplate`模板类，可以方便地操作JDBC；
+2. 支持流行的ORM框架，如Hibernate、JPA等；
+3. 支持声明式事务，只需要通过简单的注解配置即可实现事务管理。
+在Winter Framework中，我们准备提供一个`JdbcTemplate`模板，以及声明式事务的支持。对于ORM，反正手动集成也比较容易，就不管了。
+
+
+|                            | Spring Framework | 	Winter Framework |
+|:--------------------------:|------------------|-------------------|
+|        JdbcTemplate        | 	支持              | 	支持               |
+| NamedParameterJdbcTemplate | 	支持              | 	不支持              |
+|          转换SQL错误码          | 	支持              | 	不支持              |
+|            ORM             | 	支持              | 	不支持              |
+|           手动管理事务           | 	支持              | 	不支持              |
+|           声明式事务            | 	支持              | 	支持               |
+
+下面开始正式开发Winter Framework的JdbcTemplate与声明式事务。
+## 1.实现JdbcTemplate
+本节我们来实现JdbcTemplate。在Spring中，通过JdbcTemplate，基本封装了所有JDBC操作，可以覆盖绝大多数数据库操作的场景。
+
+配置DataSource
+使用JdbcTemplate之前，我们需要配置JDBC数据源。Spring本身只提供了基础的`DriverManagerDataSource`，但Spring Boot有一个默认配置的数据源，并采用HikariCP作为连接池。这里我们仿照Spring Boot的方式，先定义默认的数据源配置项：
+```yaml
+winter:
+  datasource:
+    url: jdbc:mysql://localhost:3306/test?useUnicode=true&characterEncoding=utf8&autoReconnect=true&failOverReadOnly=false
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: root
+    password: 123456
+```
+再实现一个HikariCP支持的`DataSource`：
+```java
+@Configuration
+public class JdbcConfiguration {
+    @Bean(destroyMethod = "dataSourceClose")
+    DataSource dataSource(
+            @Value("${winter.datasource.url}") String url,
+            @Value("${winter.datasource.username}") String username,
+            @Value("${winter.datasource.password}") String password,
+            @Value("${winter.datasource.driver-class-name}") String driver,
+            @Value("${winter.datasource.maximum-pool-size:20}") int maximumPoolSize,
+            @Value("${winter.datasource.minimum-pool-size:1}") int minimumPoolSize,
+            @Value("${winter.datasource.connection-timeout:30000}") int connTimeout
+    ) {
+        HikariConfig config = new HikariConfig();
+        config.setAutoCommit(false);
+        config.setJdbcUrl(url);
+        config.setUsername(username);
+        config.setPassword(password);
+        if (driver != null) {
+            config.setDriverClassName(driver);
+        }
+        config.setMaximumPoolSize(maximumPoolSize);
+        config.setMaximumPoolSize(minimumPoolSize);
+        config.setConnectionTimeout(connTimeout);
+        return new HikariDataSource(config);
+    }
+
+    @Bean
+    public JdbcTemplate jdbcTemplate(@Autowired DataSource dataSource) {
+        return new JdbcTemplate(dataSource);
+    }
+
+    public void dataSourceClose() {
+        HikariDataSource hikariDataSource = (HikariDataSource) ApplicationContextUtils.getRequiredApplicationContext().getBean("dataSource");
+        hikariDataSource.close();
+    }
+}
+```
+这样，客户端引入`JdbcConfiguration`就自动获得了数据源：
+```java
+@Import(JdbcConfiguration.class)
+@ComponentScan
+@Configuration
+public class AppConfig {
+}
+```
+**定义JdbcTemplate**
+下一步是定义`JdbcTemplate`，唯一依赖是注入`DataSource`：
+```java
+public class JdbcTemplate {
+    final DataSource dataSource;
+
+    public JdbcTemplate(DataSource dataSource) {
+        this.dataSource = dataSource;
+    }
+}
+```
+JdbcTemplate基于Template模式，提供了大量以回调作为参数的模板方法，其中以`execute(ConnectionCallback)`为基础：
+```java
+public <T> T execute(ConnectionCallback<T> action) {
+    try (Connection newConn = dataSource.getConnection()) {
+        T result = action.doInConnection(newConn);
+        return result;
+    } catch (SQLException e) {
+        throw new DataAccessException(e);
+    }
+}
+```
+即由`JdbcTemplate`处理获取连接、释放连接、捕获`SQLException`，上层代码专注于使用`Connection`：
+```java
+@FunctionalInterface
+public interface ConnectionCallback<T> {
+    @Nullable
+    T doInConnection(Connection con) throws SQLException;
+}
+```
+其他方法其实也是基于`execute(ConnectionCallback)`，例如：
+```java
+public <T> T execute(PreparedStatementCreator psc, PreparedStatementCallback<T> action) {
+    return execute((Connection con) -> {
+        try (PreparedStatement ps = psc.createPreparedStatement(con)) {
+            return action.doInPreparedStatement(ps);
+        }
+    });
+}
+```
+上述代码实现了`ConnectionCallback`，内部又调用了传入的`PreparedStatementCreator`和`PreparedStatementCallback`，这样，基于更新操作的`update`就可以这么写：
+```java
+public int update(String sql, Object... args) {
+    return execute(
+        preparedStatementCreator(sql, args),
+        (PreparedStatement ps) -> {
+            return ps.executeUpdate();
+        }
+    );
+}
+```
+基于查询操作的`queryForList()`就可以这么写：
+```java
+public <T> List<T> queryForList(String sql, RowMapper<T> rowMapper, Object... args) {
+    return execute(preparedStatementCreator(sql, args),
+        (PreparedStatement ps) -> {
+            List<T> list = new ArrayList<>();
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    list.add(rowMapper.mapRow(rs, rs.getRow()));
+                }
+            }
+            return list;
+        }
+    );
+}
+```
+剩下的一系列查询方法都是基于上述方法的封装，包括：
+
+* queryForList(String sql, RowMapper rowMapper, Object... args)
+* queryForList(String sql, Class clazz, Object... args)
+* queryForNumber(String sql, Object... args)
+总之，就是一个工作量的问题，开发难度基本为0。
+
+测试时，可以使用`Sqlite`这个轻量级数据库，测试用例覆盖到各种SQL操作，最后把`JdbcTemplate`加入到`JdbcConfiguration`中，就基本完善了。
+## 2.实现声明式事务
+Spring提供的声明式事务管理能极大地降低应用程序的事务代码。如果使用基于Annotation配置的声明式事务，则一个与数据库操作相关的类只需加上`@Transactional`注解，就实现了事务支持，非常方便：
+```java
+@Transactional
+@Component
+public class UserService {
+}
+```
+Spring的声明式事务支持JDBC本地事务和JTA分布式事务两种，事务传播模型除了最常用的`REQUIRED`，还包括Java EE定义的`SUPPORTS`、`REQUIRED_NEW`、`NESTED`等多种模式。Winter Framework出于简化目的，仅支持JDBC本地事务，事务传播模型仅支持最常用的`REQUIRED`，这样可以大大简化代码：
+
+|              | Spring Framework | Winter Framework |
+|--------------|------------------|------------------|
+| JDBC事务       | 支持               | 支持               |
+| JTA事务        | 支持               | 不支持              |
+| REQUIRED传播模式 | 支持               | 支持               |
+| 其他传播模式       | 支持               | 不支持              |
+| 设置隔离级别       | 支持               | 不支持              |
+
+下面我们就来编写声明式事务管理。
+
+首先定义`@Transactional`，这里就不允许单独在方法处定义，直接在class级别启动所有public方法的事务：
+```java
+@Target(ElementType.TYPE)
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+@Inherited
+public @interface Transactional {
+    String value() default "platformTransactionManager";
+}
+```
+默认值`platformTransactionManager`表示用名字为`platformTransactionManager`的Bean来管理事务。
+
+下一步是定义接口`PlatformTransactionManager`：
+```java
+public interface PlatformTransactionManager {
+}
+```
+其实啥也没有，就是一个标识作用。
+
+接着定义`TransactionStatus`，表示当前事务状态：
+```java
+public class TransactionStatus {
+    final Connection connection;
+
+    public TransactionStatus(Connection connection) {
+        this.connection = connection;
+    }
+}
+```
+
+目前仅封装了一个Connection，将来如果扩展，则可以将事务的传播模式存储在里面。
+
+最后写个`DataSourceTransactionManager`，它持有一个`ThreadLocal`存储的`TransactionStatus`，以及一个`DataSource`：
+```java
+public class DataSourceTransactionManager implements
+        PlatformTransactionManager, InvocationHandler
+{
+    static final ThreadLocal<TransactionStatus> transactionStatus = new ThreadLocal<>();
+    final DataSource dataSource;
+
+    public DataSourceTransactionManager(DataSource dataSource) {
+        this.dataSource = dataSource;
+    }
+}
+```
+因为`DataSourceTransactionManager`是真正执行开启、提交、回归事务的地方，在哪执行呢？就在`invoke()`内部：
+```java
+    @Override
+    public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+        TransactionStatus transactionStatus = TRANSACTION_STATUS.get();
+        if (transactionStatus == null) {
+            //当前无事务，开启新事务。
+            try (Connection connection = dataSource.getConnection()) {
+                final boolean autoCommit = connection.getAutoCommit();
+                if (autoCommit) {
+                    connection.setAutoCommit(false);
+                }
+                try {
+                    //设置ThreadLocal状态
+                    TRANSACTION_STATUS.set(new TransactionStatus(connection));
+                    //调用业务方法
+                    Object result = method.invoke(proxy, args);
+                    //提交事务
+                    connection.commit();
+                    return result;
+                } catch (Exception e) {
+                    //回滚事务
+                    logger.warn("发生了异常： {}，事务即将回滚！", e.getCause() == null ? "null" : e.getCause().getClass().getName());
+                    TransactionException transactionException = new TransactionException(e.getCause());
+                    try {
+                        connection.rollback();
+                    } catch (SQLException ex) {
+                        transactionException.addSuppressed(ex);
+                    }
+                    throw transactionException;
+                } finally {
+                    TRANSACTION_STATUS.remove();
+                    if (autoCommit) {
+                        connection.setAutoCommit(true);
+                    }
+                }
+            }
+        } else {
+            // 当前已有事务,加入当前事务执行:
+            return method.invoke(proxy, args);
+        }
+    }
+```
+这样就实现了声明式事务。
+
+如果一个方法开启了事务，那么，它内部调用其他方法，是怎么加入当前事务的？
+
+这里我们先需要写一个获取当前事务连接的工具类：
+```java
+public class TransactionalUtils {
+    @Nullable
+    public static Connection getCurrentConnection() {
+        TransactionStatus ts = DataSourceTransactionManager.transactionStatus.get();
+        return ts == null ? null : ts.connection;
+    }
+}
+```
+然后改造下`JdbcTemplate`获取连接的代码：
+```java
+public class JdbcTemplate {
+    public <T> T execute(ConnectionCallback<T> action) throws DataAccessException {
+        // 尝试获取当前事务连接:
+        Connection current = TransactionalUtils.getCurrentConnection();
+        if (current != null) {
+            try {
+                return action.doInConnection(current);
+            } catch (SQLException e) {
+                throw new DataAccessException(e);
+            }
+        }
+        // 无事务,从DataSource获取新连接:
+        try (Connection newConn = dataSource.getConnection()) {
+            return action.doInConnection(newConn);
+        } catch (SQLException e) {
+            throw new DataAccessException(e);
+        }
+    }
+    ...
+}
+```
+这样，使用`JdbcTemplate`，如果有事务，自动加入当前事务，否则，按普通SQL执行（数据库隐含事务）。
+
+最后，还需要提供一个`TransactionalBeanPostProcessor`，使得AOP机制生效，才能拦截`@Transactional`标注的Bean的public方法：
+```java
+public class TransactionalBeanPostProcessor extends AnnotationProxyBeanPostProcessor<Transactional> {
+}
+```
+把它们都整理一下，放到`JdbcConfiguration`中：
+```java
+@Configuration
+public class JdbcConfiguration {
+
+    @Bean(destroyMethod = "close")
+    DataSource dataSource(
+            // properties:
+            @Value("${summer.datasource.url}") String url,
+            @Value("${summer.datasource.username}") String username,
+            @Value("${summer.datasource.password}") String password,
+            @Value("${summer.datasource.driver-class-name:}") String driver,
+            @Value("${summer.datasource.maximum-pool-size:20}") int maximumPoolSize,
+            @Value("${summer.datasource.minimum-pool-size:1}") int minimumPoolSize,
+            @Value("${summer.datasource.connection-timeout:30000}") int connTimeout
+    ) {
+        ...
+        return new HikariDataSource(config);
+    }
+
+    @Bean
+    JdbcTemplate jdbcTemplate(@Autowired DataSource dataSource) {
+        return new JdbcTemplate(dataSource);
+    }
+
+    @Bean
+    TransactionalBeanPostProcessor transactionalBeanPostProcessor() {
+        return new TransactionalBeanPostProcessor();
+    }
+
+    @Bean
+    PlatformTransactionManager platformTransactionManager(@Autowired DataSource dataSource) {
+        return new DataSourceTransactionManager(dataSource);
+    }
+}
+```
+现在，应用程序只需导入`JdbcConfiguration`，从连接池到声明式事务全部齐活：
+```java
+@Import(JdbcConfiguration.class)
+@ComponentScan
+@Configuration
+public class AppConfig {
+}
+```
+最后我们总结下各个组件的作用：
+
+1. 由`JdbcConfiguration`创建的`DataSource`，实现了连接池；
+2. 由`JdbcConfiguration`创建的`JdbcTemplate`，实现基本SQL操作；
+3. 由`JdbcConfiguration`创建的`PlatformTransactionManager`，负责拦截`@Transactional`标识的Bean的public方法，自动管理事务；
+4. 由`JdbcConfiguration`创建的`TransactionalBeanPostProcessor`，负责给`@Transactional`标识的Bean创建AOP代理，拦截器正是`PlatformTransactionManager`。
+应用程序除了导入一个`JdbcConfiguration`，加上默认配置项，什么也不用干，就可以开始写自动带声明式事务的代码：
+```java
+@Transactional
+@Component
+public class UserService {
+    @Autowired
+    JdbcTemplate jdbcTemplate;
+
+    public User register(String email, String password) {
+        jdbcTemplate.update("INSERT INTO ...", ...);
+        return ...
+    }
+}
+```
