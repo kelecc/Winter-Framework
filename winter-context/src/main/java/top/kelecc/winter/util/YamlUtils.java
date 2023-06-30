@@ -7,6 +7,7 @@ import org.yaml.snakeyaml.constructor.Constructor;
 import org.yaml.snakeyaml.representer.Representer;
 import org.yaml.snakeyaml.resolver.Resolver;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.HashMap;
@@ -21,7 +22,9 @@ import java.util.Map;
 public class YamlUtils {
     public static Map<String, Object> loadYamlAsPlainMap(String path) {
         try (InputStream inputStream = Thread.currentThread().getContextClassLoader().getResourceAsStream(path)) {
-
+            if (inputStream == null) {
+                throw new FileNotFoundException(String.format("yaml文件: '%s' 不存在！", path));
+            }
             LoaderOptions loaderOptions = new LoaderOptions();
             DumperOptions dumperOptions = new DumperOptions();
             Representer representer = new Representer(dumperOptions);
