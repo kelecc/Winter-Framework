@@ -11,13 +11,8 @@ public class DateTimeConfig {
     @Bean
     LocalDateTime local() { return LocalDateTime.now(); }
 
-    @Bean(initMethod = "zonedInit",destroyMethod = "zonedDestroy")
+    @Bean
     ZonedDateTime zoned() { return ZonedDateTime.now(); }
 
-    public void zonedInit(){
-        System.out.println("ZonedDateTime初始化！");
-    }
-    public void zonedDestroy(){
-        System.out.println("ZonedDateTime开始销毁...");
-    }
+
 }
