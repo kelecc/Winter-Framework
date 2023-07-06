@@ -772,12 +772,10 @@ public class AnnotationConfigApplicationContext implements ConfigurableApplicati
                 throw new BeanCreationException(e);
             }
         } else if (!Objects.isNull(destroyMethodName)) {
-            String factoryName = def.getFactoryName();
-            BeanDefinition factoryDef = findBeanDefinition(factoryName);
-            Method method = ClassUtils.getMethodByName(factoryDef.getBeanClass(), destroyMethodName);
+            Method method = ClassUtils.getMethodByName(def.getBeanClass(), destroyMethodName);
             method.setAccessible(true);
             try {
-                method.invoke(factoryDef.getInstance());
+                method.invoke(instance);
                 logger.debug("bean: '{}': {} 已经销毁!", def.getName(), def.getBeanClass().getName());
             } catch (Exception e) {
                 throw new BeanCreationException(e);
