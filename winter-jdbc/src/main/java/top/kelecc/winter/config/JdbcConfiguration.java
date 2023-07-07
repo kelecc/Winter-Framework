@@ -6,7 +6,6 @@ import top.kelecc.winter.annotation.Autowired;
 import top.kelecc.winter.annotation.Bean;
 import top.kelecc.winter.annotation.Configuration;
 import top.kelecc.winter.annotation.Value;
-import top.kelecc.winter.context.ApplicationContextUtils;
 import top.kelecc.winter.jdbc.JdbcTemplate;
 import top.kelecc.winter.jdbc.tx.DataSourceTransactionManager;
 import top.kelecc.winter.jdbc.tx.PlatformTransactionManager;
@@ -22,7 +21,7 @@ import javax.sql.DataSource;
  */
 @Configuration
 public class JdbcConfiguration {
-    @Bean(destroyMethod = "dataSourceClose")
+    @Bean(destroyMethod = "close")
     DataSource dataSource(
             @Value("${winter.datasource.url}") String url,
             @Value("${winter.datasource.username}") String username,
@@ -60,8 +59,4 @@ public class JdbcConfiguration {
         return new DataSourceTransactionManager(dataSource);
     }
 
-    public void dataSourceClose() {
-        HikariDataSource hikariDataSource = (HikariDataSource) ApplicationContextUtils.getRequiredApplicationContext().getBean("dataSource");
-        hikariDataSource.close();
-    }
 }
