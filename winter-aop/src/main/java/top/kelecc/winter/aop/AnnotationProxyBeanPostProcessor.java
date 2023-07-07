@@ -23,9 +23,11 @@ import java.util.Objects;
 public abstract class AnnotationProxyBeanPostProcessor<A extends Annotation> implements BeanPostProcessor {
     Map<String, Object> originBeans = new HashMap<>();
     Class<A> annotationClass;
+
     public AnnotationProxyBeanPostProcessor() {
         this.annotationClass = getParameterizedType();
     }
+
     @Override
     public Object postProcessBeforeInitialization(Object bean, String beanName) {
         Class<?> beanClass = bean.getClass();
@@ -37,8 +39,8 @@ public abstract class AnnotationProxyBeanPostProcessor<A extends Annotation> imp
             } catch (ReflectiveOperationException e) {
                 throw new AopConfigException(String.format("@%s 必须有value()方法且返回值是String.", this.annotationClass.getSimpleName()), e);
             }
-            Object proxy = this.createProxy(beanClass,bean,handlerName);
-            originBeans.put(beanName,bean);
+            Object proxy = this.createProxy(beanClass, bean, handlerName);
+            originBeans.put(beanName, bean);
             return proxy;
         }
         return bean;
@@ -48,7 +50,7 @@ public abstract class AnnotationProxyBeanPostProcessor<A extends Annotation> imp
         ConfigurableApplicationContext ctx = (ConfigurableApplicationContext) ApplicationContextUtils.getRequiredApplicationContext();
         BeanDefinition beanDefinition = ctx.findBeanDefinition(handlerName);
         if (Objects.isNull(beanDefinition)) {
-            throw new AopConfigException(String.format("处理bean: %s 时未找到handler: '%s'",beanClass.getName(),handlerName));
+            throw new AopConfigException(String.format("处理bean: %s 时未找到handler: '%s'", beanClass.getName(), handlerName));
         }
         Object handler = beanDefinition.getInstance();
         if (Objects.isNull(handler)) {
@@ -57,7 +59,7 @@ public abstract class AnnotationProxyBeanPostProcessor<A extends Annotation> imp
         if (handler instanceof InvocationHandler) {
             return ProxyResolver.getInstance().creatProxy(bean, (InvocationHandler) handler);
         } else {
-            throw new AopConfigException(String.format("处理bean: %s 时handler实例化异常，@Around中标注的类不是InvocationHandler实现类！",beanClass.getName()));
+            throw new AopConfigException(String.format("处理bean: %s 时handler实例化异常，'%s'中标注的类不是InvocationHandler实现类！", beanClass.getName(), annotationClass.getSimpleName()));
         }
     }
 
