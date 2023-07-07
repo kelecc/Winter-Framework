@@ -88,7 +88,7 @@ public class AnnotationConfigApplicationContext implements ConfigurableApplicati
                 throw new BeanCreationException(e);
             }
         } else if (!Objects.isNull(initMethodName)) {
-            Method method = ClassUtils.getMethodByName(def.getBeanClass(), initMethodName);
+            Method method = ClassUtils.getMethodByName(instance.getClass(), initMethodName);
             method.setAccessible(true);
             try {
                 method.invoke(def.getInstance());
@@ -772,7 +772,7 @@ public class AnnotationConfigApplicationContext implements ConfigurableApplicati
                 throw new BeanCreationException(e);
             }
         } else if (!Objects.isNull(destroyMethodName)) {
-            Method method = ClassUtils.getMethodByName(def.getBeanClass(), destroyMethodName);
+            Method method = ClassUtils.getMethodByName(instance.getClass(), destroyMethodName);
             method.setAccessible(true);
             try {
                 method.invoke(instance);
