@@ -1461,17 +1461,7 @@ class MvcController {
 
 我们用图描述一下注入关系：
 
-┌───────────────┐
-│MvcController  │
-├───────────────┤   ┌────────────────┐
-│- userService ─┼──▶│UserServiceProxy│
-└───────────────┘   ├────────────────┤
-                    │- jdbcTemplate  │
-                    ├────────────────┤   ┌────────────────┐
-                    │- target       ─┼──▶│UserService     │
-                    └────────────────┘   ├────────────────┤   ┌────────────┐
-                                         │- jdbcTemplate ─┼──▶│JdbcTemplate│
-                                         └────────────────┘   └────────────┘
+![img.png](./doc/img/img_proxy.png)
 注意到上图的`UserService`已经脱离了IoC容器的管理，因为此时`UserService`对应的`BeanDefinition`中，存放的`instance`是`UserServiceProxy`。
 
 可见，引入`BeanPostProcessor`可以实现Proxy机制，但也让依赖注入变得更加复杂。
@@ -2494,13 +2484,13 @@ public class JdbcConfiguration {
     @Bean(destroyMethod = "close")
     DataSource dataSource(
             // properties:
-            @Value("${summer.datasource.url}") String url,
-            @Value("${summer.datasource.username}") String username,
-            @Value("${summer.datasource.password}") String password,
-            @Value("${summer.datasource.driver-class-name:}") String driver,
-            @Value("${summer.datasource.maximum-pool-size:20}") int maximumPoolSize,
-            @Value("${summer.datasource.minimum-pool-size:1}") int minimumPoolSize,
-            @Value("${summer.datasource.connection-timeout:30000}") int connTimeout
+            @Value("${Winter.datasource.url}") String url,
+            @Value("${Winter.datasource.username}") String username,
+            @Value("${Winter.datasource.password}") String password,
+            @Value("${Winter.datasource.driver-class-name:}") String driver,
+            @Value("${Winter.datasource.maximum-pool-size:20}") int maximumPoolSize,
+            @Value("${Winter.datasource.minimum-pool-size:1}") int minimumPoolSize,
+            @Value("${Winter.datasource.connection-timeout:30000}") int connTimeout
     ) {
         ...
         return new HikariDataSource(config);
@@ -2550,3 +2540,414 @@ public class UserService {
     }
 }
 ```
+# 实现Web MVC
+现在，我们已经实现了IoC容器、AOP、JdbcTemplate和声明式事务，离一个完整的框架只差一个Web MVC了。
+
+我们先看看Spring的Web MVC主要提供了哪些组件和API支持：
+
+1. 一个`DispatcherServlet`作为核心处理组件，接收所有URL请求，然后按MVC规则转发；
+2. 基于`@Controller`注解的URL控制器，由应用程序提供，Spring负责解析规则；
+3. 提供`ViewResolver`，将应用程序的`Controller`处理后的结果进行渲染，给浏览器返回页面；
+4. 基于`@RestController`注解的REST处理机制，由应用程序提供，Spring负责将输入输出变为JSON格式；
+5. 多种拦截器和异常处理器等。
+Spring的Web MVC功能十分强大，涉及到的内容也非常广。相比之下，Winter Framework的Web MVC必然要聚焦在核心组件上：
+
+   |                    | Spring Framework | 	Winter Framework |
+   |--------------------|------------------|-------------------|
+   | DispatcherServlet  | 	支持              | 	支持               |
+   | @Controller注解      | 	支持              | 	支持               |
+   | @RestController注解  | 	支持              | 	支持               |
+   | ViewResolver       | 	支持              | 	支持               |
+   | HandlerInterceptor | 	支持              | 	不支持              |
+   | Exception Handler  | 	支持              | 	不支持              |
+   | CORS               | 	支持              | 	不支持              |
+   | 异步处理               | 	支持              | 	不支持              |
+   | WebSocket          | 	支持              | 	不支持              |
+
+不过，Spring Framework的Web MVC模块对`Filter`支持有限，要想愉快地使用`Filter`，最好通过Spring Boot提供的`FilterRegistrationBean`，Winter Framework为了便于应用程序开发自己的`Filter`，直接支持`FilterRegistrationBean`。
+
+下面开始正式开发Winter Framework的Web MVC模块。
+
+## 1. 启动IoC容器
+在开发Web MVC模块之前，我们首先回顾下Java Web应用程序到底有几方参与。
+
+首先，Java Web应用一般遵循Servlet标准，这个标准定义了应用程序可以按接口编写哪些组件：Servlet、Filter和Listener，也规定了一个服务器（如Tomcat、Jetty、JBoss等）应该提供什么样的服务，按什么顺序加载应用程序的组件，最后才能跑起来处理来自用户的HTTP请求。
+
+Servlet规范定义的组件有3类：
+
+1. Servlet：处理HTTP请求，然后输出响应；
+2. Filter：对HTTP请求进行过滤，可以有多个Filter形成过滤器链，实现权限检查、限流、缓存等逻辑；
+3. Listener：用来监听Web应用程序产生的事件，包括启动、停止、Session有修改等。
+这些组件均由应用程序实现。
+
+而服务器为一个应用程序提供一个“容器”，即Servlet Container，一个Server可以同时跑多个Container，不同的Container可以按URL、域名等区分，Container才是用来管理Servlet、Filter、Listener这些组件的：
+![img_1.png](./doc/img/img_servlet_container.png)
+
+另一个需要特别重要的问题是：组件由谁创建，由谁销毁。
+
+在使用IoC容器时，注意到IoC容器也是一个Java类，IoC容器又管理着很多Bean，因此，创建顺序是：
+
+执行应用程序的入口方法`main()`；
+在`main()`方法中，创建IoC容器的实例；
+IoC容器在它的内部创建各个Bean的实例。
+现在，我们开发的是Web应用程序，它本身就是一堆组件，被Web服务器提供的Servlet“容器”管理，同时，又要加一个IoC容器，到底谁创建谁，谁管理谁，这个问题，必须要搞清楚。
+
+首先，我们不能改变Servlet规范，所以，Servlet、Filter、Listener，以及IoC容器，都必须在Servlet容器内被管理：
+![img.png](./doc/img/img_servletContainerIoc.png)
+
+所以我们要捋清楚这些组件的创建顺序，以及谁创建谁。
+
+对于一个Web应用程序来说，启动时，应用程序本身只是一个war包，并没有main()方法，因此，启动时执行的是Server的main()方法。以Tomcat服务器为例：
+
+启动服务器，即执行Tomcat的`main()`方法；
+1. Tomcat根据配置或自动检测到一个`xyz.war`包后，为这个`xyz.war`应用程序创建Servlet容器；
+2. Tomcat继续查找`xyz.war`定义的Servlet、Filter和Listener组件，按顺序实例化每个组件（Listener最先被实例化，然后是Filter，最后是Servlet）；
+3. 用户发送HTTP请求，Tomcat收到请求后，转发给Servlet容器，容器根据应用程序定义的映射，把请求发送个若干Filter和一个Servlet处理；
+4. 处理期间产生的事件则由Servlet容器自动调用Listener。
+
+其中，第3步实例化又有很多方式：
+
+1. 通过在`web.xml`配置文件中定义，这也是早期Servlet规范唯一的配置方式；
+2. 通过注解`@WebServlet`、`@WebFilter`和`@WebListener`定义，由Servlet容器自动扫描所有class后创建组件，这和我们用Annotation配置Bean，由IoC容器自动扫描创建Bean非常类似；
+3. 先配置一个`Listener`，由Servlet容器创建`Listener`，然后，`Listener`自己调用相关接口，手动创建`Servlet`和`Filter`。
+到底用哪种方式，取决于Web应用程序自己如何编写。对于使用Spring框架的Web应用程序来说，Servlet、Filter和Listener数量少，而且是固定的，应用程序自身编写的Controller数量不定，但由IoC容器管理，因此，采用方式3最合适。
+
+具体来说，Tomcat启动一个基于Spring开发的Web应用程序时，按如下步骤初始化：
+
+1. 为Web应用程序准备Servlet容器；
+2. 根据配置实例化一个Spring提供的`Listener`；
+   1. Spring提供的`Listener`在初始化时启动IoC容器；
+   2. Spring提供的`Listener`在初始化时向Servlet容器注册Spring内置的一个`DispatcherServlet`。
+   
+当Tomcat把HTTP请求发送给Spring注册的`Servlet`后，因为它持有IoC容器的引用，就可以找到`Controller`实例，因此，可以把请求继续转发给对应的`Controller`，这样就完成了HTTP请求的处理。
+
+另外注意到Web应用程序除了提供`Controller`外，并不必须与Servlet API打交道，因为被Spring提供的`DispatcherServlet`给隔离了。
+
+所以，我们在开发Winter Framework的Web MVC模块时，应该以如下方式初始化：
+
+1. 应用程序必须配置一个Winter Framework提供的Listener；
+2. Tomcat完成Servlet容器的创建后，立刻根据配置创建Listener；
+   1. Listener初始化时创建IoC容器；
+   2. Listener继续创建DispatcherServlet实例，并向Servlet容器注册；
+   3. DispatcherServlet初始化时获取到IoC容器中的Controller实例，因此可以根据URL调用不同Controller实例的不同处理方法。
+我们先写一个只能输出Hello World的Servlet：
+```java
+public class DispatcherServlet extends HttpServlet {
+    @Override
+    protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+        PrintWriter pw = resp.getWriter();
+        pw.write("<h1>Hello, world!</h1>");
+        pw.flush();
+    }
+}
+```
+紧接着，编写一个`ContextLoaderListener`，它实现了`ServletContextListener`接口，能监听Servlet容器的启动和销毁，在监听到初始化事件时，完成创建IoC容器和注册`DispatcherServlet`两个工作：
+```java
+public class ContextLoaderListener implements ServletContextListener {
+    // Servlet容器启动时自动调用:
+    @Override
+    public void contextInitialized(ServletContextEvent sce) {
+        // 创建IoC容器:
+        var applicationContext = createApplicationContext(...);
+        // 实例化DispatcherServlet:
+        var dispatcherServlet = new DispatcherServlet();
+        // 注册DispatcherServlet:
+        var dispatcherReg = servletContext.addServlet("dispatcherServlet", dispatcherServlet);
+        dispatcherReg.addMapping("/");
+        dispatcherReg.setLoadOnStartup(0);
+    }
+}
+```
+这样，我们就完成了Web应用程序的初始化全部流程！
+
+最后两个小问题：
+
+1. 创建IoC容器时，需要的配置文件从哪读？这里我们采用Spring Boot的方式，默认从classpath的`application.yaml`或`application.properties`读。
+2. 需要的`@Configuration`配置类从哪获取？这是通过`web.xml`文件配置的：
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<web-app ...>
+	<context-param>
+        <!-- 固定名称 -->
+		<param-name>configuration</param-name>
+        <!-- 配置类的完整类名 -->
+		<param-value>top.kelecc.webapp.WebAppConfig</param-value>
+	</context-param>
+
+	<listener>
+		<listener-class>top.kelecc.winter.web.ContextLoaderListener</listener-class>
+	</listener>
+</web-app>
+```
+在`ContextLoaderListener`的`contextInitialized()`方法内，先获取`ServletContext`引用，再通过`getInitParameter("configuration")`拿到完整类名，就可以顺利创建IoC容器了。
+
+用Maven打包后，把生成的`xyz.war`改为`ROOT.war`，复制到Tomcat的`webapps`目录下，清除掉其他webapp，启动Tomcat，输入`http://localhost:8080`可看到输出`Hello, world!`。
+
+这样我们就跑通了一个Web应用程序启动的全部流程。
+
+## 2. 实现MVC
+上一节我们把Web应用程序的流程跑通了，因此，本节重点就在如何继续开发`DispatcherServlet`，因为整个MVC的处理都是在`DispatcherServlet`内部完成的。
+
+要处理MVC，我们先定义`@Controller`和`@RestController`：
+```java
+@Target(ElementType.TYPE)
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+@Component
+public @interface Controller {
+    String value() default "";
+}
+
+@Target(ElementType.TYPE)
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+@Component
+public @interface RestController {
+    String value() default "";
+}
+```
+以及`@GetMapping`、`@PostMapping`等注解，来标识MVC处理的方法。
+
+`DispatcherServlet`内部负责从IoC容器找出所有`@Controller`和`@RestController`定义的Bean，扫描它们的方法，找出`@GetMapping`和`@PostMapping`标识的方法，这样就有了一个处理特定URL的处理器，我们抽象为`Dispatcher`：
+```java
+class Dispatcher {
+    // 是否返回REST:
+    boolean isRest;
+    // 是否有@ResponseBody:
+    boolean isResponseBody;
+    // 是否返回void:
+    boolean isVoid;
+    // URL正则匹配:
+    Pattern urlPattern;
+    // Bean实例:
+    Object controller;
+    // 处理方法:
+    Method handlerMethod;
+    // 方法参数:
+    Param[] methodParameters;
+}
+```
+方法参数也需要根据`@RequestParam`、`@RequestBody`等抽象出`Param`类型：
+```java
+class Param {
+    // 参数名称:
+    String name;
+    // 参数类型:
+    ParamType paramType;
+    // 参数Class类型:
+    Class<?> classType;
+    // 参数默认值
+    String defaultValue;
+}
+```
+一共有4种类型的参数，我们用枚举`ParamType`定义：
+
+* `PATH_VARIABLE`：路径参数，从URL中提取；
+* `REQUEST_PARAM`：URL参数，从URL Query或Form表单提取；
+* `REQUEST_BODY`：REST请求参数，从Post传递的JSON提取；
+* `SERVLET_VARIABLE`：`HttpServletRequest`等Servlet API提供的参数，直接从`DispatcherServlet`的方法参数获得。
+这样，`DispatcherServlet`通过反射拿到一组`Dispatcher`对象，在`doGet()`和`doPost()`方法中，依次匹配URL：
+```java
+public class DispatcherServlet extends HttpServlet {
+
+    List<Dispatcher> getDispatchers = new ArrayList<>();
+    List<Dispatcher> postDispatchers = new ArrayList<>();
+
+    @Override
+    protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+        String url = req.getRequestURI();
+        // 依次匹配每个Dispatcher的URL:
+        for (Dispatcher dispatcher : getDispatchers) {
+            Result result = dispatcher.process(url, req, resp);
+            // 匹配成功并处理后:
+            if (result.processed()) {
+                // 处理结果
+                ...
+                return;
+            }
+        }
+        // 未匹配到任何Dispatcher:
+        resp.sendError(404, "Not Found");
+    }
+
+    @Override
+    protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+        ...
+    }
+}
+```
+这里不能用`Map<String, Dispatcher>`的原因在于我们要处理类似`/hello/{name}`这样的URL，没法使用精确查找，只能使用正则匹配。
+
+`Dispatcher`处理后返回类型包括：
+
+* `void`或`null`：表示内部已处理完毕；
+* `String`：如果以`redirect:`开头，则表示一个重定向；
+* `String`或`byte[]`：如果配合`@ResponseBody`，则表示返回值直接写入响应；
+* `ModelAndView`：表示这是一个MVC响应，包含Model和View名称，后续用模板引擎处理后写入响应；
+* 其它类型：如果是`@RestController`，则序列化为JSON后写入响应。
+不符合上述要求的返回类型则报500错误。
+
+这些处理逻辑都十分简单，我们重点看看如何处理`ModelAndView`类型，即MVC响应。
+
+为了处理`ModelAndView`，我们需要一个模板引擎，因此，抽象出`ViewResolver`接口：
+```java
+public interface ViewResolver {
+    // 初始化ViewResolver:
+    void init();
+
+    // 渲染:
+    void render(String viewName, Map<String, Object> model, HttpServletRequest req, HttpServletResponse resp);
+}
+```
+Spring内置FreeMarker引擎，因此我们也把FreeMarker集成进来，写一个`FreeMarkerViewResolver`：
+```java
+ublic class FreeMarkerViewResolver implements ViewResolver {
+
+    final String templatePath;
+    final String templateEncoding;
+    final ServletContext servletContext;
+
+    Configuration config;
+
+    public FreeMarkerViewResolver(ServletContext servletContext, String templatePath, String templateEncoding) {
+        this.servletContext = servletContext;
+        this.templatePath = templatePath;
+        this.templateEncoding = templateEncoding;
+    }
+
+    @Override
+    public void init() {
+        Configuration cfg = new Configuration(Configuration.VERSION_2_3_32);
+        cfg.setOutputFormat(HTMLOutputFormat.INSTANCE);
+        cfg.setDefaultEncoding(this.templateEncoding);
+        cfg.setTemplateLoader(new ServletTemplateLoader(this.servletContext, this.templatePath));
+        cfg.setTemplateExceptionHandler(TemplateExceptionHandler.HTML_DEBUG_HANDLER);
+        cfg.setAutoEscapingPolicy(Configuration.ENABLE_IF_SUPPORTED_AUTO_ESCAPING_POLICY);
+        cfg.setLocalizedLookup(false);
+        var ow = new DefaultObjectWrapper(Configuration.VERSION_2_3_32);
+        ow.setExposeFields(true);
+        cfg.setObjectWrapper(ow);
+        this.config = cfg;
+    }
+
+    @Override
+    public void render(String viewName, Map<String, Object> model, HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+        Template templ = null;
+        try {
+            templ = this.config.getTemplate(viewName);
+        } catch (Exception e) {
+            throw new ServerErrorException("View not found: " + viewName);
+        }
+        PrintWriter pw = resp.getWriter();
+        try {
+            templ.process(model, pw);
+        } catch (TemplateException e) {
+            throw new ServerErrorException(e);
+        }
+        pw.flush();
+    }
+}
+```
+这样我们就可以在`DispatcherServlet`内部，把处理ModelAndView和ViewResolver结合起来，最终向`HttpServletResponse`中输出HTML，完成HTTP请求的处理。
+
+为了简化Web应用程序配置，我们提供一个`WebMvcConfiguration`配置：
+```java
+@Configuration
+public class WebMvcConfiguration {
+    private static ServletContext servletContext = null;
+    static void setServletContext(ServletContext ctx) {
+        servletContext = ctx;
+    }
+
+    @Bean(initMethod = "init")
+    ViewResolver viewResolver( //
+            @Autowired ServletContext servletContext, //
+            @Value("${Winter.web.freemarker.template-path:/WEB-INF/templates}") String templatePath, //
+            @Value("${Winter.web.freemarker.template-encoding:UTF-8}") String templateEncoding) {
+        return new FreeMarkerViewResolver(servletContext, templatePath, templateEncoding);
+    }
+
+    @Bean
+    ServletContext servletContext() {
+        return Objects.requireNonNull(servletContext, "ServletContext is not set.");
+    }
+}
+```
+默认创建一个ViewResolver和ServletContext，注意ServletContext本身实际上是由Servlet容器提供的，但我们把它放入IoC容器，是因为许多涉及到Web的组件，如ViewResolver，需要注入ServletContext，才能从指定配置加载文件。
+
+最后，整理代码，添加一些能方便用户开发的额外功能，例如处理静态文件等功能，我们的Web MVC模块就开发完毕！
+
+注意事项
+在整个HTTP处理流程中，入口是DispatcherServlet的service()方法，整个流程如下：
+
+1. Servlet容器调用DispatcherServlet的service()方法处理HTTP请求；
+2. service()根据GET或POST调用doGet()或doPost()方法；
+3. 根据URL依次匹配Dispatcher，匹配后调用process()方法，获得返回值；
+4. 根据返回值写入响应：
+   1. void或null返回值无需写入响应；
+   2. String或byte[]返回值直接写入响应（或重定向）；
+   3. REST类型写入JSON序列化结果；
+   4. ModelAndView类型调用ViewResolver写入渲染结果。
+5. 未匹配到判断是否静态资源：
+   1. 符合静态目录（默认/static/）则读取文件，写入文件内容；
+   2. 网站图标（默认/favicon.ico）则读取.ico文件，写入文件内容；
+6. 其他情况返回404。
+由于在处理的每一步都可以向`HttpServletResponse`写入响应，因此，后续步骤写入时，应判断前面的步骤是否已经写入并发送了HTTP Header。`isCommitted()`方法就是干这个用的：
+```java
+if (!resp.isCommitted()) {
+    resp.resetBuffer();
+    writeTo(resp);
+}
+```
+## 3. 开发web应用
+在我们开发完Winter Framework的所有组件后，就可以基于Winter Framework来开发一个真正的Web应用了！
+
+我们来一步一步创建一个`hello-webapp`的应用，它基于Maven项目，符合webapp标准。
+
+首先，我们在`src/main/resources`下定义配置文件`application.yaml`：
+```yaml
+app:
+  title: Hello Application
+  version: 1.0
+
+Winter:
+  datasource:
+    url: jdbc:sqlite:test.db
+    driver-class-name: org.sqlite.JDBC
+    username: sa
+    password: 
+```
+紧接着，定义IoC容器的配置类如下：
+```java
+@ComponentScan
+@Configuration
+@Import({ JdbcConfiguration.class, WebMvcConfiguration.class })
+public class HelloConfiguration {
+}
+```
+以及相关的`UserService`、`MvcController`等Bean。
+
+接下来是在`src/main/webapp/WEB-INF`目录下创建Servlet容器所需的配置文件`web.xml`：
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<web-app ...>
+	<display-name>Hello Webapp</display-name>
+
+	<context-param>
+		<param-name>configuration</param-name>
+		<param-value>com.kele.hello.HelloConfiguration</param-value>
+	</context-param>
+
+	<listener>
+		<listener-class>top.kelecc.Winter.web.ContextLoaderListener</listener-class>
+	</listener>
+</web-app>
+```
+Servlet容器会自动读取`web.xml`，根据配置的Listener启动Winter Framework的web模块的`ContextLoaderListener`，它又会读取web.xml配置的`<context-param>`获得配置类的全名`com.kele.hello.HelloConfiguration`，最后用这个配置类完成IoC容器的创建。创建后自动注册Winter Framework的`DispatcherServlet`，以及Web应用程序定义的`FilterRegistrationBean`，这样就完成了整个Web应用程序的初始化。
+
+其他用到的资源包括：
+
+* 存储在`src/main/webapp/static`目录下的静态资源；
+* 存储于`src/main/webapp/favicon.ico`的图标文件；
+* 存储在`src/main/webapp/WEB-INF/templates`目录下的模板。
+最后，运行`mvn clean package`命令，在`target`目录得到最终的`war`包，改名为`ROOT.war`，复制到Tomcat的`webapps`目录下，启动Tomcat，可以正常访问`http://localhost:8080`.
